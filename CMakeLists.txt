@@ -75,7 +75,6 @@ include_directories(
   ${Boost_INCLUDE_DIRS}
   ${OpenCV_INCLUDE_DIRS}
   ${catkin_INCLUDE_DIRS}
-  ${spdlog_INCLUDE_DIRS}
 )
 
 # Link directories
@@ -89,8 +88,7 @@ set(CMAKE_INSTALL_RPATH_USE_LINK_PATH FALSE)
 file(GLOB_RECURSE
   core_src_files
   ${PROJECT_SOURCE_DIR}/src/core/*.cc
-  ${PROJECT_SOURCE_DIR}/src/controllers/*.cc
-  ${PROJECT_SOURCE_DIR}/src/algorithms/*.cc
+  ${PROJECT_SOURCE_DIR}/src/motion_control/*.cc
   ${PROJECT_SOURCE_DIR}/src/utils/*.cc
 )
 
@@ -113,14 +111,8 @@ target_link_libraries(hy_picking_controllers
 )
 
 # Build executable node
-add_executable(controller_manager_node app/controller_manager_node.cc)
-target_link_libraries(controller_manager_node
+add_executable(test_standard_scara_controller examples/test_standard_scara_controller.cc)
+target_link_libraries(test_standard_scara_controller
   hy_picking_controllers  
   ${catkin_LIBRARIES}
-)
-
-# 安装目标
-install(TARGETS controller_manager_node hy_picking_controllers
-  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
 )

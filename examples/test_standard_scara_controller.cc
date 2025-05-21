@@ -1,10 +1,10 @@
 #include <hy_common/logger/logger.h>
 #include <ros/ros.h>
 
-#include "hy_picking_controllers/core/controller_manager.h"
+#include "hy_picking_controllers/core/arm_controller_base.h"
 
 int main(int argc, char** argv) {
-  ros::init(argc, argv, "controller_manager_node");
+  ros::init(argc, argv, "test_standard_scara_controller");
 
   ros::NodeHandle nh;
   ros::NodeHandle nh_private("~");
@@ -14,9 +14,7 @@ int main(int argc, char** argv) {
       "controller_manager_node.log", 1 * 1024 * 1024, 10);
 
   LOG_INFO("-------------------------------");
-  LOG_INFO("Controller manager node started");
-
-  hy_picking_controllers::ControllerManager controller_manager(nh, nh_private);
+  LOG_INFO("Test standard scara controller started");
 
   ros::Rate loop_rate(10);  // 10Hz
 
