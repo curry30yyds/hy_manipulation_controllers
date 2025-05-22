@@ -1,7 +1,7 @@
 #include <hy_common/logger/logger.h>
 #include <ros/ros.h>
 
-#include "hy_picking_controllers/core/arm_controller_base.h"
+#include "hy_picking_controllers/core/arm_controller.h"
 
 int main(int argc, char** argv) {
   ros::init(argc, argv, "test_standard_scara_controller");
@@ -13,8 +13,9 @@ int main(int argc, char** argv) {
       hy_common::logger::LogLevel::INFO, hy_common::logger::LogLevel::INFO,
       "controller_manager_node.log", 1 * 1024 * 1024, 10);
 
-  LOG_INFO("-------------------------------");
+  LOG_INFO("--------------------------------");
   LOG_INFO("Test standard scara controller started");
+  LOG_INFO("--------------------------------");
 
   ros::Rate loop_rate(10);  // 10Hz
 

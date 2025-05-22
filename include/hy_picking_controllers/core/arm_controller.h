@@ -22,9 +22,9 @@ enum ArmControllerState {
   AC_STATE_ERROR
 };
 
-class ArmControllerBase {
+class ArmController {
  public:
-  typedef std::shared_ptr<ArmControllerBase> Ptr;
+  typedef std::shared_ptr<ArmController> Ptr;
 
  public:
   /**
@@ -33,22 +33,22 @@ class ArmControllerBase {
    * @param _namespace 机械臂命名空间（话题前缀）
    * @param _arm_params 机械臂参数
    */
-  ArmControllerBase(std::string _namespace, nlohmann::json _arm_params);
+  ArmController(std::string _namespace, nlohmann::json _arm_params);
 
   /**
    * @brief 析构函数
    */
-  ~ArmControllerBase();
+  ~ArmController();
 
   /**
    * @brief 连接机械臂（开启内部线程）
    */
-  virtual void Connect() = 0;
+  void Connect();
 
   /**
    * @brief 断开机械臂（关闭内部线程）
    */
-  virtual void Disconnect() = 0;
+  void Disconnect();
 
   /**
    * @brief 获取机械臂状态
@@ -67,10 +67,10 @@ class ArmControllerBase {
    * @param _stiffness 刚度(0.0~1.0)
    * @param _block_flag 是否阻塞
    */
-  virtual void DoJointPositionControl(
-      const Eigen::VectorXf& _target_joint_positions,
-      const float& _vel_percentage, const float& _acc_duration,
-      const float& _stiffness, const bool& _block_flag) = 0;
+  void DoJointPositionControl(const Eigen::VectorXf& _target_joint_positions,
+                              const float& _vel_percentage,
+                              const float& _acc_duration,
+                              const float& _stiffness, const bool& _block_flag);
 
   /**
    * @brief 关节空间轨迹控制
@@ -81,10 +81,10 @@ class ArmControllerBase {
    * @param _stiffness 刚度(0.0~1.0)
    * @param _block_flag 是否阻塞
    */
-  virtual void DoJointTrajectoryControl(
+  void DoJointTrajectoryControl(
       const std::vector<Eigen::VectorXf>& _target_trajectory_positions,
       const float& _vel_percentage, const float& _acc_duration,
-      const float& _stiffness, const bool& _block_flag) = 0;
+      const float& _stiffness, const bool& _block_flag);
 
   /**
    * @brief 笛卡尔空间位姿控制
@@ -95,10 +95,10 @@ class ArmControllerBase {
    * @param _stiffness 刚度(0.0~1.0)
    * @param _block_flag 是否阻塞
    */
-  virtual void DoCartesianPoseControl(
+  void DoCartesianPoseControl(
       const hy_common::geometry::Transform3D& _target_pose,
       const float& _max_cartesian_vel, const float& _acc_duration,
-      const float& _stiffness, const bool& _block_flag) = 0;
+      const float& _stiffness, const bool& _block_flag);
 
   /**
    * @brief 笛卡尔空间轨迹控制
@@ -109,35 +109,35 @@ class ArmControllerBase {
    * @param _stiffness 刚度(0.0~1.0)
    * @param _block_flag 是否阻塞
    */
-  virtual void DoCartesianTrajectoryControl(
+  void DoCartesianTrajectoryControl(
       const std::vector<hy_common::geometry::Transform3D>&
           _target_trajectory_poses,
       const float& _max_cartesian_vel, const float& _acc_duration,
-      const float& _stiffness, const bool& _block_flag) = 0;
+      const float& _stiffness, const bool& _block_flag);
 
   /**
    * @brief 启动拖拽模式（重力补偿，用于示教）
    *
    * @param _stiffness 刚度(0.0~1.0)
    */
-  virtual void StartDragMode(const float& _stiffness) = 0;
+  void StartDragMode(const float& _stiffness);
 
   /**
    * @brief 停止拖拽模式
    */
-  virtual void StopDragMode() = 0;
+  void StopDragMode();
 
   /**
    * @brief 启动静止模式（机械臂静止在当前位置）
    *
    * @param _stiffness 刚度(0.0~1.0)
    */
-  virtual void StartStaticMode(const float& _stiffness) = 0;
+  void StartStaticMode(const float& _stiffness);
 
   /**
    * @brief 停止静止模式
    */
-  virtual void StopStaticMode() = 0;
+  void StopStaticMode();
 
   /**
    * @brief 启动点动模式
@@ -145,28 +145,27 @@ class ArmControllerBase {
    * @param _vel_percentage 速度百分比(0.0~1.0)
    * @param _stiffness 刚度(0.0~1.0)
    */
-  virtual void StartJoggingMode(const float& _vel_percentage,
-                                const float& _stiffness) = 0;
+  void StartJoggingMode(const float& _vel_percentage, const float& _stiffness);
 
   /**
    * @brief 设置点动关节目标
    *
    * @param _joint_target 关节目标
    */
-  virtual void SetJoggingJointTarget(const Eigen::VectorXf& _joint_target) = 0;
+  void SetJoggingJointTarget(const Eigen::VectorXf& _joint_target);
 
   /**
    * @brief 设置点动末端位姿目标
    *
    * @param _pose_target 末端位姿目标
    */
-  virtual void SetJoggingPoseTarget(
-      const hy_common::geometry::Transform3D& _pose_target) = 0;
+  void SetJoggingPoseTarget(
+      const hy_common::geometry::Transform3D& _pose_target);
 
   /**
    * @brief 停止点动模式
    */
-  virtual void StopJoggingMode() = 0;
+  void StopJoggingMode();
 
  public:
   /**
@@ -175,8 +174,8 @@ class ArmControllerBase {
    * @param _joint_positions_in 关节位置
    * @param _end_pose_out 末端位姿
    */
-  virtual bool SolveFK(const Eigen::VectorXf& _joint_positions_in,
-                       hy_common::geometry::Transform3D& _end_pose_out) = 0;
+  bool SolveFK(const Eigen::VectorXf& _joint_positions_in,
+               hy_common::geometry::Transform3D& _end_pose_out);
 
   /**
    * @brief 逆运动学求解
@@ -184,8 +183,8 @@ class ArmControllerBase {
    * @param _end_pose_in 末端位姿
    * @param _joint_positions_out 关节位置
    */
-  virtual bool SolveIK(const hy_common::geometry::Transform3D& _end_pose_in,
-                       Eigen::VectorXf& _joint_positions_out) = 0;
+  bool SolveIK(const hy_common::geometry::Transform3D& _end_pose_in,
+               Eigen::VectorXf& _joint_positions_out);
 
   /**
    * @brief 采样末端位姿的逆解
@@ -196,25 +195,25 @@ class ArmControllerBase {
    * @param _end_orientation_sample_step 末端朝向的采样步长
    * @param _solutions 逆解
    */
-  virtual bool SamplePositionIKSolutions(
+  bool SamplePositionIKSolutions(
       const hy_common::geometry::Point3D& _end_position_in,
       const std::vector<Eigen::VectorXf>& _joint_lower_limits,
       const std::vector<Eigen::VectorXf>& _joint_upper_limits,
       const float& _end_orientation_sample_step,
-      std::vector<Eigen::VectorXf>& _solutions) = 0;
+      std::vector<Eigen::VectorXf>& _solutions);
 
  protected:
   /**
    * @brief 状态发布线程
    *
    */
-  virtual void StatePubThread() = 0;
+  void StatePubThread();
 
   /**
    * @brief 控制线程
    *
    */
-  virtual void ControlThread() = 0;
+  void ControlThread();
 
  protected:
   std::unique_ptr<ros::NodeHandle> nh_;
