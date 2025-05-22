@@ -11,7 +11,7 @@
 #include <thread>
 #include <vector>
 
-namespace hy_picking_controllers {
+namespace hy_manipulation_controllers {
 
 /**
  * @brief 机械臂控制器状态枚举
@@ -226,4 +226,4 @@ class ArmController {
   hy_common::geometry::Transform3D current_end_pose_;  // 当前笛卡尔位姿
 };
 
-}  // namespace hy_picking_controllers
+}  // namespace hy_manipulation_controllers

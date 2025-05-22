@@ -1,7 +1,7 @@
 #include <hy_common/logger/logger.h>
 #include <ros/ros.h>
 
-#include "hy_picking_controllers/core/arm_controller.h"
+#include "hy_manipulation_controllers/core/arm_controller.h"
 
 int main(int argc, char** argv) {
   ros::init(argc, argv, "test_standard_scara_controller");

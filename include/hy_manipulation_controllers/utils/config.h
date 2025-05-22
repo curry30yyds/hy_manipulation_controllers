@@ -11,4 +11,4 @@
 #define USE_LICENSE 0
 
 // Directory
-#define DK_SOURCE_DIR "/home/hangyu/ROS_Projects/catkin_picking/src/hy_picking_controllers"
+#define DK_SOURCE_DIR "/home/hangyu/ROS_Projects/catkin_picking/src/hy_manipulation_controllers"

@@ -1,6 +1,6 @@
-#include "hy_picking_controllers/core/arm_controller.h"
+#include "hy_manipulation_controllers/core/arm_controller.h"
 
-namespace hy_picking_controllers {
+namespace hy_manipulation_controllers {
 
 ArmController::ArmController(std::string _namespace,
                              nlohmann::json _arm_params) {
@@ -9,4 +9,4 @@ ArmController::ArmController(std::string _namespace,
 
 ArmController::~ArmController() {}
 
-}  // namespace hy_picking_controllers
+}  // namespace hy_manipulation_controllers

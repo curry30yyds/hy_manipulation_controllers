@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
 <package>
-  <name>hy_picking_controllers</name>
+  <name>hy_manipulation_controllers</name>
   <version>1.0.0</version>
-  <description>hy_picking_controllers</description>
+  <description>hy_manipulation_controllers</description>
   <maintainer email="wuhangyu@hy-robot.com">Harry wu</maintainer>
   <license>TODO</license>
 

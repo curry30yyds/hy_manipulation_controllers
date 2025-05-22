@@ -6,7 +6,7 @@ if(POLICY CMP0048)
 endif()
 
 # Project setup
-project(hy_picking_controllers VERSION 1.0.0 LANGUAGES C CXX)
+project(hy_manipulation_controllers VERSION 1.0.0 LANGUAGES C CXX)
 
 # Set C++ standard and build type
 set(CMAKE_CXX_STANDARD 17)
@@ -21,16 +21,16 @@ add_definitions(-D_GNU_SOURCE)
 # Configure version and other headers
 configure_file(
   ${PROJECT_SOURCE_DIR}/config.h.in
-  ${PROJECT_SOURCE_DIR}/include/hy_picking_controllers/utils/config.h
+  ${PROJECT_SOURCE_DIR}/include/hy_manipulation_controllers/utils/config.h
 )
 configure_file(
   ${PROJECT_SOURCE_DIR}/version.h.in
-  ${PROJECT_SOURCE_DIR}/include/hy_picking_controllers/utils/version.h
+  ${PROJECT_SOURCE_DIR}/include/hy_manipulation_controllers/utils/version.h
   @ONLY
 )
 
 # Option to build tests (disabled by default)
-option(COMPILE_TESTS "Build hy_picking_controllers tests" OFF)
+option(COMPILE_TESTS "Build hy_manipulation_controllers tests" OFF)
 
 # Find ROS and required packages
 find_package(catkin REQUIRED COMPONENTS
@@ -97,11 +97,11 @@ file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/logs)
 
 # 构建核心库
 add_library(
-  hy_picking_controllers
+  hy_manipulation_controllers
   SHARED
   ${core_src_files}
 )
-target_link_libraries(hy_picking_controllers
+target_link_libraries(hy_manipulation_controllers
   ${catkin_LIBRARIES}
   ${YAML_CPP_LIBRARIES}
   ${Boost_LIBRARIES}
@@ -113,6 +113,6 @@ target_link_libraries(hy_picking_controllers
 # Build executable node
 add_executable(test_standard_scara_controller examples/test_standard_scara_controller.cc)
 target_link_libraries(test_standard_scara_controller
-  hy_picking_controllers  
+  hy_manipulation_controllers
   ${catkin_LIBRARIES}
 )
