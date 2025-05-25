@@ -11,6 +11,8 @@
 #include <thread>
 #include <vector>
 
+#include "hy_manipulation_controllers/motion_controller/motion_controller_base.h"
+
 namespace hy_manipulation_controllers {
 
 /**
@@ -202,7 +204,7 @@ class ArmController {
       const float& _end_orientation_sample_step,
       std::vector<Eigen::VectorXf>& _solutions);
 
- protected:
+ private:
   /**
    * @brief 状态发布线程
    *
@@ -215,15 +217,34 @@ class ArmController {
    */
   void ControlThread();
 
- protected:
+  /**
+   * @brief 更新机械臂状态消息(接收)
+   */
+  void UpdateArmStateMsgs();
+
+  /**
+   * @brief 更新机械臂控制消息(发送)
+   */
+  void PublishArmControlMsgs();
+
+  /**
+   * @brief 更新机械臂TF
+   */
+  void UpdateArmTf();
+
+ private:
   std::unique_ptr<ros::NodeHandle> nh_;
+
+  std::shared_ptr<MotionControllerBase> motion_controller_current_;
+  std::shared_ptr<MotionControllerBase> motion_controller_next_;
 
   std::thread control_thread_;    // 控制线程
   std::thread state_pub_thread_;  // 状态发布线程
 
-  Eigen::VectorXf current_joint_positions_;            // 当前关节位置
-  Eigen::VectorXf current_joint_velocities_;           // 当前关节速度
   hy_common::geometry::Transform3D current_end_pose_;  // 当前笛卡尔位姿
+
+  std::vector<JointState> joint_states_;
+  std::vector<JointControlCommand> joint_control_commands_;
 };
 
 }  // namespace hy_manipulation_controllers
