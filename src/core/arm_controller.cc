@@ -8,7 +8,7 @@ ArmController::ArmController(const std::string& _namespace,
 }
 
 void ArmController::ControlThread() {
-  float update_rate = 200.0;
+  ros::Rate rate(200.0);
 
   while (ros::ok()) {
     // 1. 更新机械臂状态
@@ -26,8 +26,7 @@ void ArmController::ControlThread() {
     // 5. 发布机械臂控制命令
     PublishArmControlMsgs();
 
-    std::this_thread::sleep_for(
-        std::chrono::microseconds(int64_t(1000000 / update_rate)));
+    rate.sleep();
   }
 }
 
