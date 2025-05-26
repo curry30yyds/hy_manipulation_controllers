@@ -11,6 +11,8 @@
 #include <thread>
 #include <vector>
 
+#include "hy_manipulation_controllers/core/arm_controller_params.h"
+#include "hy_manipulation_controllers/kinematics/kinematics_solver.h"
 #include "hy_manipulation_controllers/motion_controller/motion_controller_base.h"
 
 namespace hy_manipulation_controllers {
@@ -33,9 +35,10 @@ class ArmController {
    * @brief 构造函数
    *
    * @param _namespace 机械臂命名空间（话题前缀）
-   * @param _arm_params 机械臂参数
+   * @param _param_folder 机械臂参数文件夹
    */
-  ArmController(std::string _namespace, nlohmann::json _arm_params);
+  ArmController(const std::string& _namespace,
+                const std::string& _param_folder);
 
   /**
    * @brief 析构函数
@@ -218,6 +221,17 @@ class ArmController {
   void ControlThread();
 
   /**
+   * @brief 更新运动控制器状态
+   *
+   */
+  void UpdateMotionControllerState();
+
+  /**
+   * @brief 更新机械臂控制器状态
+   */
+  void UpdateArmControllerState();
+
+  /**
    * @brief 更新机械臂状态消息(接收)
    */
   void UpdateArmStateMsgs();
@@ -237,6 +251,8 @@ class ArmController {
 
   std::shared_ptr<MotionControllerBase> motion_controller_current_;
   std::shared_ptr<MotionControllerBase> motion_controller_next_;
+
+  std::shared_ptr<KinematicsSolver> kinematics_solver_;
 
   std::thread control_thread_;    // 控制线程
   std::thread state_pub_thread_;  // 状态发布线程

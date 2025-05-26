@@ -3,6 +3,7 @@
 #include <memory>
 #include <vector>
 
+#include "hy_manipulation_controllers/core/arm_controller_params.h"
 #include "hy_manipulation_controllers/utils/utils_common.h"
 
 namespace hy_manipulation_controllers {
@@ -21,29 +22,14 @@ enum MotionControllerState {
   MCS_ERROR,     // 错误
 };
 
-class JointParams {
- public:
-  int id;
-  std::string type;  // "LINEAR" or "ROTATIONAL"
-  float reduction_ratio;
-  float max_vel;             // rad/s or m/s
-  float max_acc;             // rad/s^2 or m/s^2
-  std::string control_mode;  // "POSITION" or "VELOCITY" or "TORQUE" or "MIT"
-};
-
-class MotionControllerParams {
- public:
-  std::vector<JointParams> joint_control_params;
-
-  float update_rate;
-};
-
 class MotionControllerBase {
  public:
   typedef std::shared_ptr<MotionControllerBase> Ptr;
 
  public:
-  MotionControllerBase(const MotionControllerParams& _params);
+  MotionControllerBase(
+      const std::vector<JointControlParams>& _joint_control_params);
+
   ~MotionControllerBase();
 
   /**
@@ -88,7 +74,7 @@ class MotionControllerBase {
   }
 
  protected:
-  MotionControllerParams motion_controller_params_;
+  std::vector<JointControlParams> joint_control_params_;
 
   MotionControllerState motion_controller_state_;
 };

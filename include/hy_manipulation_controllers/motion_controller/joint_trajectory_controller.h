@@ -6,7 +6,8 @@ namespace hy_manipulation_controllers {
 
 class JointTrajectoryController : public MotionControllerBase {
  public:
-  JointTrajectoryController(const MotionControllerParams& _params);
+  JointTrajectoryController(
+      const std::vector<JointControlParams>& _joint_control_params);
 
   MotionControllerType GetMotionControllerType() const override {
     return MotionControllerType::MCT_JOINT_TRAJECTORY;
