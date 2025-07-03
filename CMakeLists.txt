@@ -42,6 +42,7 @@ find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
   cv_bridge
   image_transport
+
 )
 
 # ROS-specific setup
@@ -66,7 +67,9 @@ find_package(Eigen3 REQUIRED)
 find_package(Boost REQUIRED COMPONENTS system filesystem)
 find_package(OpenCV QUIET)
 find_package(nlohmann_json 3.11.0 REQUIRED)
-
+find_package(orocos_kdl REQUIRED)
+find_package(kdl_parser REQUIRED)
+find_package(trac_ik_lib REQUIRED)
 # Include directories
 include_directories(
   include
@@ -75,6 +78,9 @@ include_directories(
   ${Boost_INCLUDE_DIRS}
   ${OpenCV_INCLUDE_DIRS}
   ${catkin_INCLUDE_DIRS}
+  ${orocos_kdl_INCLUDE_DIRS}
+  ${kdl_parser_INCLUDE_DIRS}
+  ${trac_ik_lib_INCLUDE_DIRS}
 )
 
 # Link directories
@@ -108,11 +114,20 @@ target_link_libraries(hy_manipulation_controllers
   ${ROS_LIBRARIES}
   hy_common
   nlohmann_json::nlohmann_json
+  ${orocos_kdl_LIBRARIES}
+  ${kdl_parser_LIBRARIES}
+  ${trac_ik_lib_LIBRARIES}
 )
 
 # Build executable node
 add_executable(test_standard_scara_controller examples/test_standard_scara_controller.cc)
 target_link_libraries(test_standard_scara_controller
+  hy_manipulation_controllers
+  ${catkin_LIBRARIES}
+)
+#test
+add_executable(test_kinematics_solver src/test/test_kinematics_node.cc)
+target_link_libraries(test_kinematics_solver
   hy_manipulation_controllers
   ${catkin_LIBRARIES}
 )
