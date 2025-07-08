@@ -24,28 +24,43 @@ int main(int argc, char **argv)
     ros::init(argc, argv, "test_kinematics_solver");
     ros::NodeHandle nh("~");
     // 参数获取
-    std::string package_path = ros::package::getPath("hy_manipulation_controllers");
-    if (package_path.empty())
-    {
-        LOG_ERROR("Failed to find package path for my_robot_description");
-        return -1;
-    }
 
-    std::string urdf_path = package_path + "/urdf/panda_arm.urdf";
+    std::string source_dir = std::string(DK_SOURCE_DIR);
+    std::string cam_params_json_path = source_dir + "/params/config/camera_extrinsics.json";
+
+    std::string urdf_path = source_dir + "/params/urdf/scara.urdf";
     LOG_INFO("URDF path: [{}] ", urdf_path);
 
+    CameraExtrinsicParams CamParams_;
+    CamParams_.loadFromJson(cam_params_json_path);
     // 求解器构造
-    std::shared_ptr<hy_manipulation_controllers::KinematicsSolver> solver;
+    std::shared_ptr<KinematicsSolver> solver;
     try
     {
-        solver = std::make_shared<hy_manipulation_controllers::KinematicsSolver>(urdf_path);
+        solver = std::make_shared<KinematicsSolver>(urdf_path);
     }
     catch (const std::exception &e)
     {
         LOG_ERROR("Failed to create KinematicsSolver: {}", e.what());
         return -1;
     }
+    if (!solver->LoadCameraExtrinsics(CamParams_))
+    {
+        LOG_ERROR("Failed to load camera extrinsic parameters.");
+    }
+    Eigen::Matrix4f extrinsics_out;
+    if (!solver->GetCameraExtrinsics(extrinsics_out))
+    {
+        LOG_ERROR("Failed to load camera extrinsic parameters.");
+    }
+    else
+    {
+        std::stringstream ss;
+        ss << "\nCamera extrinsic matrix [R|t] (from world to camera):\n"
+           << extrinsics_out;
 
+        LOG_INFO("{}", ss.str().c_str());
+    }
     unsigned int num_joints = solver->GetChain().getNrOfJoints();
 
     // FK
@@ -58,13 +73,13 @@ int main(int argc, char **argv)
     }
 
     // 求解FK
-    Eigen::Matrix4f end_pose;
+    hy_common::geometry::Transform3D end_pose;
     if (solver->SolveFK(joint_angles, end_pose))
     {
         std::cout << "\n[FK] Input Joint Angles:\n"
                   << joint_angles.transpose() << std::endl;
         std::cout << "\n[FK] Resulting End Effector Pose:\n"
-                  << end_pose << std::endl;
+                  << end_pose.GetMatrix4f() << std::endl;
     }
     else
     {
@@ -75,10 +90,7 @@ int main(int argc, char **argv)
     LOG_INFO("\n\n>>>>>>>>>> TESTING INVERSE KINEMATICS (IK) >>>>>>>>>>");
     Eigen::VectorXf ik_solution_joints(num_joints);
 
-    Eigen::VectorXf joint_positions_;
-    joint_positions_ = Eigen::VectorXf::Zero(num_joints);
-
-    if (solver->SolveIK(end_pose, joint_positions_, ik_solution_joints))
+    if (solver->SolveIK(end_pose, ik_solution_joints))
     {
         std::cout << "IK succeeded! Joint values:\n"
                   << ik_solution_joints.transpose() << std::endl;
@@ -90,23 +102,23 @@ int main(int argc, char **argv)
 
     // 轨迹插值
 
-    LOG_INFO("\n\n>>>>>>>>>> TESTING TRAJECTORY INTERPOLATION >>>>>>>>>>");
-    int num_steps = 5;
-    double duration = 5;
-    std::vector<KDL::JntArray> trajectory;
+    // LOG_INFO("\n\n>>>>>>>>>> TESTING TRAJECTORY INTERPOLATION >>>>>>>>>>");
+    // int num_steps = 5;
+    // double duration = 5;
+    // std::vector<KDL::JntArray> trajectory;
 
-    if (solver->InterpolateTrajectory(joint_positions_, ik_solution_joints, trajectory, duration, num_steps))
-    {
-        LOG_INFO("--- Resulting Trajectory ({} steps) ---", trajectory.size());
-        for (size_t i = 0; i < trajectory.size(); ++i)
-        {
-            printJntArray(trajectory[i], "Step " + std::to_string(i));
-        }
-    }
-    else
-    {
-        LOG_ERROR("Trajectory Interpolation Test Failed!");
-    }
+    // if (solver->InterpolateTrajectory(joint_positions_, ik_solution_joints, trajectory, duration, num_steps))
+    // {
+    //     LOG_INFO("--- Resulting Trajectory ({} steps) ---", trajectory.size());
+    //     for (size_t i = 0; i < trajectory.size(); ++i)
+    //     {
+    //         printJntArray(trajectory[i], "Step " + std::to_string(i));
+    //     }
+    // }
+    // else
+    // {
+    //     LOG_ERROR("Trajectory Interpolation Test Failed!");
+    // }
 
     ros::spinOnce();
 

@@ -42,7 +42,7 @@ find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
   cv_bridge
   image_transport
-
+  hy_hardware_interface
 )
 
 # ROS-specific setup
@@ -54,7 +54,12 @@ if(roscpp_FOUND)
 
   catkin_package(
     INCLUDE_DIRS include
-    CATKIN_DEPENDS std_msgs geometry_msgs sensor_msgs
+    CATKIN_DEPENDS 
+    std_msgs 
+    geometry_msgs 
+    sensor_msgs
+    hy_hardware_interface
+
   )
 else()
   message(WARNING "ROS not found, disabling ROS support!")

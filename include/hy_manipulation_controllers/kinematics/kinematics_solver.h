@@ -13,6 +13,7 @@
 #include "hy_common/geometry/core/transform.h"
 #include <hy_common/logger/logger.h>
 #include "hy_manipulation_controllers/utils/config.h"
+#include "hy_manipulation_controllers/core/arm_controller_params.h"
 // #include "hy_manipulation_controllers/core/arm_controller.h"
 
 namespace hy_manipulation_controllers
@@ -32,10 +33,9 @@ namespace hy_manipulation_controllers
     virtual ~KinematicsSolver() = default;
 
     bool SolveFK(const Eigen::VectorXf &_joint_positions_in,
-                 Eigen::Matrix4f &_end_pose_out);
+                 hy_common::geometry::Transform3D &_end_pose_out);
 
-    bool SolveIK(const Eigen::Matrix4f &_end_pose_in,
-                 Eigen::VectorXf &_joint_positions_in,
+    bool SolveIK(const hy_common::geometry::Transform3D &_end_pose_in,
                  Eigen::VectorXf &_joint_positions_out);
 
     bool InterpolateTrajectory(const Eigen::VectorXf &_start_joints,
@@ -43,13 +43,16 @@ namespace hy_manipulation_controllers
                                std::vector<KDL::JntArray> &trajectory,
                                double duration,
                                int num_steps);
+    // bool InterpolateTrajectory(const std::vector<Eigen::VectorXf> &_trajectory_joints,
+    //                            std::vector<KDL::JntArray> &trajectory,
+    //                            double duration,
+    //                            int num_steps);
 
     bool SamplePose(Eigen::Matrix4f &_sampled_pose_out);
 
-    void SetCameraExtrinsics(const KDL::Frame &_camera_to_base_transform);
+    bool LoadCameraExtrinsics(const CameraExtrinsicParams &_params);
 
-    KDL::Frame TransformPoseFromCameraToBase(
-        const KDL::Frame &_pose_in_camera) const;
+    bool GetCameraExtrinsics(Eigen::Matrix4f &extrinsics_out) const;
 
     const KDL::Chain &GetChain() const { return chain_; }
 
@@ -61,7 +64,8 @@ namespace hy_manipulation_controllers
     std::unique_ptr<TRAC_IK::TRAC_IK> ik_solver_;
     KDL::JntArray joint_lower_limits_;
     KDL::JntArray joint_upper_limits_;
-    KDL::Frame camera_to_base_transform_;
+    bool has_camera_extrinsics_;
+    Eigen::Matrix4f camera_extrinsics_;
   };
 
 } // namespace hy_manipulation_controllers

@@ -10,12 +10,13 @@
 #include <string>
 #include <thread>
 #include <vector>
-
+#include <fstream>
 #include "hy_manipulation_controllers/core/arm_controller_params.h"
 #include "hy_manipulation_controllers/kinematics/kinematics_solver.h"
 #include "hy_manipulation_controllers/motion_controller/motion_controller_base.h"
 #include "hy_manipulation_controllers/utils/config.h"
-
+#include <hy_hardware_interface/test_dm_4dof_state.h>
+#include <hy_hardware_interface/test_dm_4dof_control.h>
 namespace hy_manipulation_controllers
 {
 
@@ -25,9 +26,9 @@ namespace hy_manipulation_controllers
     enum ArmControllerState
     {
         AC_STATE_STANDBY = 0,
-        AC_STATE_RUNNING = 1,
-        AC_STATE_ERROR = 2,
-        AC_STATE_DISABLE = 3,
+        AC_STATE_RUNNING,
+        AC_STATE_ERROR,
+        AC_STATE_DISABLE,
     };
 
     class ArmController
@@ -67,6 +68,25 @@ namespace hy_manipulation_controllers
          */
         ArmControllerState GetArmControllerState();
 
+        bool Initialize();
+
+        std::string ToString(ArmControllerState state)
+        {
+            switch (state)
+            {
+            case AC_STATE_DISABLE:
+                return "DISABLE";
+            case AC_STATE_STANDBY:
+                return "STANDBY";
+            case AC_STATE_RUNNING:
+                return "RUNNING";
+            case AC_STATE_ERROR:
+                return "ERROR";
+            default:
+                return "UNKNOWN";
+            }
+        }
+
     public:
         /**
          * @brief 关节空间位置控制
@@ -77,10 +97,11 @@ namespace hy_manipulation_controllers
          * @param _stiffness 刚度(0.0~1.0)
          * @param _block_flag 是否阻塞
          */
-        void DoJointPositionControl(const Eigen::VectorXf &_target_joint_positions,
-                                    const float &_vel_percentage,
-                                    const float &_acc_duration,
-                                    const float &_stiffness, const bool &_block_flag);
+        void
+        DoJointPositionControl(const Eigen::VectorXf &_target_joint_positions,
+                               const float &_vel_percentage,
+                               const float &_acc_duration,
+                               const float &_stiffness, const bool &_block_flag);
 
         /**
          * @brief 关节空间轨迹控制
@@ -251,9 +272,13 @@ namespace hy_manipulation_controllers
          */
         void UpdateArmTf();
 
+        void JointStateCallback(const hy_hardware_interface::test_dm_4dof_state::ConstPtr &msg);
+
+        void JointCmdsCallback(const hy_hardware_interface::test_dm_4dof_control::ConstPtr &msg);
+
     private:
         std::unique_ptr<ros::NodeHandle> nh_;
-
+        std::mutex joints_mutex_;
         std::shared_ptr<MotionControllerBase> motion_controller_current_;
         std::shared_ptr<MotionControllerBase> motion_controller_next_;
 
@@ -264,10 +289,16 @@ namespace hy_manipulation_controllers
 
         hy_common::geometry::Transform3D current_end_pose_; // 当前笛卡尔位姿
 
+        std::string urdf_path;
+        std::string cam_params_json_path;
+
         ArmControllerState control_state_;
 
         std::vector<JointState> joint_states_;
         std::vector<JointControlCommand> joint_control_commands_;
+
+        ros::Subscriber joint_states_sub_;
+        ros::Publisher joint_cmds_pub_;
     };
 
 } // namespace hy_manipulation_controllers

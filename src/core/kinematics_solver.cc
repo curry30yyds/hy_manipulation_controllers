@@ -92,8 +92,39 @@ namespace hy_manipulation_controllers
                  _base_link, _tip_link, chain_.getNrOfJoints());
     }
 
+    bool KinematicsSolver::LoadCameraExtrinsics(const CameraExtrinsicParams &_params)
+    {
+
+        Eigen::Matrix3f rotation_matrix;
+        rotation_matrix = Eigen::AngleAxisf(_params.rotation.z(), Eigen::Vector3f::UnitZ()) *
+                          Eigen::AngleAxisf(_params.rotation.y(), Eigen::Vector3f::UnitY()) *
+                          Eigen::AngleAxisf(_params.rotation.x(), Eigen::Vector3f::UnitX());
+
+        camera_extrinsics_ = Eigen::Matrix4f::Identity();
+        camera_extrinsics_.block<3, 3>(0, 0) = rotation_matrix;
+        camera_extrinsics_.block<3, 1>(0, 3) = _params.translation;
+
+        has_camera_extrinsics_ = true;
+
+        LOG_INFO("Successfully loaded camera extrinsics for frame {}.", _params.child_frame_id);
+
+        return true;
+    }
+
+    bool KinematicsSolver::GetCameraExtrinsics(Eigen::Matrix4f &_extrinsics_out) const
+    {
+        if (!has_camera_extrinsics_)
+        {
+            LOG_ERROR("Camera extrinsics have not been loaded yet.");
+            return false;
+        }
+        _extrinsics_out = camera_extrinsics_;
+
+        return true;
+    }
     bool KinematicsSolver::Initialize()
     {
+
         if (chain_.getNrOfJoints() == 0)
         {
             LOG_ERROR("Initialization failed: KDL chain has zero joints.");
@@ -133,7 +164,7 @@ namespace hy_manipulation_controllers
     }
 
     bool KinematicsSolver::SolveFK(const Eigen::VectorXf &_joint_positions_in,
-                                   Eigen::Matrix4f &_end_pose_out)
+                                   hy_common::geometry::Transform3D &_end_pose_out)
     {
         const size_t num_joints = chain_.getNrOfJoints();
         if (_joint_positions_in.size() != num_joints)
@@ -150,49 +181,54 @@ namespace hy_manipulation_controllers
 
         KDL::Frame end_effector_pose;
         int status = fk_solver_->JntToCart(q, end_effector_pose);
+        if (status != KDL::ChainFkSolverPos_recursive::E_NOERROR)
+        {
+            LOG_ERROR("FK solver failed with status code: {}", status);
+            return false;
+        }
 
+        // 转换 KDL::Frame 到 Eigen::Matrix4f
+        Eigen::Matrix4f mat = Eigen::Matrix4f::Identity();
         for (int i = 0; i < 3; ++i)
         {
             for (int j = 0; j < 3; ++j)
             {
-                _end_pose_out(i, j) = end_effector_pose.M(i, j);
+                mat(i, j) = end_effector_pose.M(i, j);
             }
-            _end_pose_out(i, 3) = end_effector_pose.p(i);
+            mat(i, 3) = end_effector_pose.p(i);
         }
 
-        _end_pose_out.row(3) << 0, 0, 0, 1;
+        // 使用 Transform3D 构造器创建目标输出
+        _end_pose_out = hy_common::geometry::Transform3D(mat);
 
-        return status == KDL::ChainFkSolverPos_recursive::E_NOERROR;
+        return true;
     }
 
-    bool KinematicsSolver::SolveIK(const Eigen::Matrix4f &_end_pose_in,
-                                   Eigen::VectorXf &_joint_positions_in,
+    bool KinematicsSolver::SolveIK(const hy_common::geometry::Transform3D &_end_pose_in,
                                    Eigen::VectorXf &_joint_positions_out)
     {
         const size_t num_joints = chain_.getNrOfJoints();
 
-        if (_joint_positions_in.size() != num_joints)
-        {
-            LOG_ERROR("IK Error: Current joint state size ({}) doesn't match chain DOF ({}).", _joint_positions_in.size(), num_joints);
-            return false;
-        }
-
+        // 使用零向量作为初始猜值（也可改为上一次解的值）
         KDL::JntArray q_init(num_joints);
         for (size_t i = 0; i < num_joints; ++i)
         {
-            q_init(i) = _joint_positions_in(i);
+            q_init(i) = 0.0;
         }
 
+        // 将 Transform3D 转为 KDL::Frame
+        Eigen::Matrix4f mat = _end_pose_in.GetMatrix4f();
         KDL::Frame end_effector_pose;
         for (int i = 0; i < 3; ++i)
         {
-            end_effector_pose.p(i) = _end_pose_in(i, 3);
+            end_effector_pose.p(i) = mat(i, 3);
             for (int j = 0; j < 3; ++j)
             {
-                end_effector_pose.M(i, j) = _end_pose_in(i, j);
+                end_effector_pose.M(i, j) = mat(i, j);
             }
         }
 
+        // 解 IK
         KDL::JntArray q_result(num_joints);
         int solution_num = ik_solver_->CartToJnt(q_init, end_effector_pose, q_result);
 
@@ -206,6 +242,7 @@ namespace hy_manipulation_controllers
             return true;
         }
 
+        LOG_ERROR("IK solver failed to find solution.");
         return false;
     }
 
@@ -274,32 +311,20 @@ namespace hy_manipulation_controllers
 
     bool KinematicsSolver::SamplePose(Eigen::Matrix4f &_sampled_pose_out)
     {
-        const size_t num_joints = chain_.getNrOfJoints();
-        Eigen::VectorXf random_joints(num_joints);
+        // const size_t num_joints = chain_.getNrOfJoints();
+        // Eigen::VectorXf random_joints(num_joints);
 
-        std::random_device rd;
-        std::mt19937 gen(rd());
+        // std::random_device rd;
+        // std::mt19937 gen(rd());
 
-        for (unsigned int i = 0; i < chain_.getNrOfJoints(); ++i)
-        {
-            std::uniform_real_distribution<> dis(joint_lower_limits_(i),
-                                                 joint_upper_limits_(i));
-            random_joints(i) = dis(gen);
-        }
+        // for (unsigned int i = 0; i < chain_.getNrOfJoints(); ++i)
+        // {
+        //     std::uniform_real_distribution<> dis(joint_lower_limits_(i),
+        //                                          joint_upper_limits_(i));
+        //     random_joints(i) = dis(gen);
+        // }
 
-        return SolveFK(random_joints, _sampled_pose_out);
-    }
-
-    void KinematicsSolver::SetCameraExtrinsics(
-        const KDL::Frame &_camera_to_base_transform)
-    {
-        camera_to_base_transform_ = _camera_to_base_transform;
-    }
-
-    KDL::Frame KinematicsSolver::TransformPoseFromCameraToBase(
-        const KDL::Frame &_pose_in_camera) const
-    {
-        return camera_to_base_transform_ * _pose_in_camera;
+        // return SolveFK(random_joints, _sampled_pose_out);
     }
 
 } // namespace hy_manipulation_controllers
