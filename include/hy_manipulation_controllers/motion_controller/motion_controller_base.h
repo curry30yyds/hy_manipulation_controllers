@@ -78,6 +78,8 @@ namespace hy_manipulation_controllers
       return motion_controller_state_;
     }
 
+    virtual void SetTrajectory(const JointTrajectory &_joint_trajectory) = 0;
+
   protected:
     std::vector<JointControlParams> joint_control_params_;
 

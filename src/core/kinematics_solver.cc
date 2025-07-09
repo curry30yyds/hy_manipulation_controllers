@@ -246,64 +246,121 @@ namespace hy_manipulation_controllers
         return false;
     }
 
-    bool KinematicsSolver::InterpolateTrajectory(const Eigen::VectorXf &_start_joints,
-                                                 const Eigen::VectorXf &_end_joints,
-                                                 std::vector<KDL::JntArray> &trajectory,
+    bool KinematicsSolver::InterpolateTrajectory(const std::vector<Eigen::VectorXf> &_trajectory_joints,
+                                                 JointTrajectory &trajectory,
                                                  double duration,
                                                  int num_steps)
     {
-        trajectory.clear();
-
-        const size_t dof = _start_joints.size();
-        if (_end_joints.size() != dof || num_steps < 2)
+        if (_trajectory_joints.size() < 2)
         {
-            LOG_ERROR("Invalid input for trajectory interpolation.");
+            LOG_ERROR("Trajectory must have at least two waypoints.");
             return false;
         }
-
-        trajectory.reserve(num_steps);
-
-        // 五次多项式轨迹系数：每个关节一个 coeff[6]
-        std::vector<std::array<double, 6>> coeffs(dof);
-
-        double T = duration;
-        double T2 = T * T;
-        double T3 = T2 * T;
-        double T4 = T3 * T;
-        double T5 = T4 * T;
-
-        // 初始速度/加速度设为 0
-        double v0 = 0.0, a0 = 0.0;
-        double vf = 0.0, af = 0.0;
-
-        for (size_t i = 0; i < dof; ++i)
+        if (duration <= 0.0)
         {
-            double p0 = _start_joints(i);
-            double pf = _end_joints(i);
-
-            auto &c = coeffs[i];
-            c[0] = p0;
-            c[1] = v0;
-            c[2] = 0.5 * a0;
-            c[3] = (20 * (pf - p0) - (8 * vf + 12 * v0) * T - (3 * a0 - af) * T2) / (2.0 * T3);
-            c[4] = (-30 * (pf - p0) + (14 * vf + 16 * v0) * T + (3 * a0 - 2 * af) * T2) / (2.0 * T4);
-            c[5] = (12 * (pf - p0) - (6 * vf + 6 * v0) * T - (a0 - af) * T2) / (2.0 * T5);
+            LOG_ERROR("Duration must be positive.");
+            return false;
+        }
+        if (num_steps < 2)
+        {
+            LOG_ERROR("Number of steps must be at least 2.");
+            return false;
+        }
+        const size_t num_waypoints = _trajectory_joints.size();
+        const size_t num_joints = _trajectory_joints[0].size();
+        for (const auto &jnt : _trajectory_joints)
+        {
+            if (jnt.size() != num_joints)
+            {
+                LOG_ERROR("All waypoints must have the same number of joints.");
+                return false;
+            }
         }
 
-        // 时间步长
-        for (int step = 0; step < num_steps; ++step)
-        {
-            double t = (duration * step) / (num_steps - 1);
-            double t2 = t * t, t3 = t2 * t, t4 = t3 * t, t5 = t4 * t;
+        trajectory.clear();
+        trajectory.reserve(num_steps);
 
-            KDL::JntArray q(dof);
-            for (size_t i = 0; i < dof; ++i)
+        std::vector<std::vector<double>> joint_points(num_joints, std::vector<double>(num_waypoints));
+        for (size_t i = 0; i < num_waypoints; ++i)
+        {
+            for (size_t j = 0; j < num_joints; ++j)
             {
-                auto &c = coeffs[i];
-                q(i) = c[0] + c[1] * t + c[2] * t2 + c[3] * t3 + c[4] * t4 + c[5] * t5;
+                joint_points[j][i] = _trajectory_joints[i](j);
+            }
+        }
+
+        double segment_duration = duration / (num_waypoints - 1);
+        std::vector<std::vector<double>> velocities(num_joints, std::vector<double>(num_waypoints, 0.0));
+
+        for (size_t j = 0; j < num_joints; ++j)
+        {
+            // 起始点和结束点速度为0
+            velocities[j][0] = 0.0;
+            velocities[j][num_waypoints - 1] = 0.0;
+
+            // 计算中间路径点的速度  待定
+            for (size_t i = 1; i < num_waypoints - 1; ++i)
+            {
+                // double p_prev = joint_points[j][i - 1];
+                // double p_next = joint_points[j][i + 1];
+                // velocities[j][i] = (p_next - p_prev) / (2.0 * segment_duration);
+                velocities[j][i] = 0.0;
+            }
+        }
+        double start_time_sec = ros::Time::now().toSec();
+        std::vector<KDL::VelocityProfile_Spline> splines(num_joints);
+        double dt = duration / (num_steps - 1);
+        int last_seg_idx = -1;
+
+        for (int i = 0; i < num_steps; ++i)
+        {
+            double t = i * dt;
+
+            // 确定当前时间 t 所在的轨迹段索引
+            int seg_idx = (t >= duration) ? (num_waypoints - 2) : static_cast<int>(t / segment_duration);
+
+            // 如果进入了一个新的段，则为新段重新配置样条曲线
+            if (seg_idx != last_seg_idx)
+            {
+                for (size_t j = 0; j < num_joints; ++j)
+                {
+                    double p0 = joint_points[j][seg_idx];
+                    double v0 = velocities[j][seg_idx];
+                    double p1 = joint_points[j][seg_idx + 1];
+                    double v1 = velocities[j][seg_idx + 1];
+
+                    // 起始和结束加速度都设为0
+                    splines[j].SetProfileDuration(p0, v0, 0.0, p1, v1, 0.0, segment_duration);
+                }
+                last_seg_idx = seg_idx;
             }
 
-            trajectory.push_back(q);
+            double t_local = t - seg_idx * segment_duration;
+            double real_timestamp = start_time_sec + t;
+
+            for (size_t j = 0; j < num_joints; ++j)
+            {
+                JointTrajectoryPoint point;
+                point.id = j;
+                point.timestamp = real_timestamp;
+                point.position = splines[j].Pos(t_local);
+                point.velocity = splines[j].Vel(t_local);
+                point.acceleration = splines[j].Acc(t_local);
+                trajectory.push_back(point);
+            }
+        }
+
+        if (trajectory.size() >= num_joints)
+        {
+            const auto &target_point_vec = _trajectory_joints.back();
+            for (size_t j = 0; j < num_joints; ++j)
+            {
+                // 定位到最后一个时间戳的对应关节
+                JointTrajectoryPoint &last_point = trajectory[trajectory.size() - num_joints + j];
+                last_point.position = target_point_vec(j);
+                last_point.velocity = 0.0f;
+                last_point.acceleration = 0.0f;
+            }
         }
 
         return true;
@@ -325,6 +382,7 @@ namespace hy_manipulation_controllers
         // }
 
         // return SolveFK(random_joints, _sampled_pose_out);
+        return true;
     }
 
 } // namespace hy_manipulation_controllers

@@ -1,5 +1,5 @@
 #pragma once
-
+#include <ros/ros.h>
 #include "hy_manipulation_controllers/motion_controller/motion_controller_base.h"
 
 namespace hy_manipulation_controllers
@@ -13,10 +13,10 @@ namespace hy_manipulation_controllers
 
     MotionControllerType GetMotionControllerType() const override
     {
-      return MotionControllerType::MCT_JOINT_TRAJECTORY;
+      return motion_controller_type;
     }
     // 输入密集轨迹点
-    void SetTrajectory(const JointTrajectory &_joint_trajectory);
+    void SetTrajectory(const JointTrajectory &_joint_trajectory) override;
 
     ~JointTrajectoryController();
 
@@ -31,6 +31,12 @@ namespace hy_manipulation_controllers
 
   private:
     JointTrajectory joint_trajectory_;
+
+    size_t trajectory_index_;
+
+    MotionControllerType motion_controller_type;
+
+    int num_joints_;
   };
 
 } // namespace hy_manipulation_controllers

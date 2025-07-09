@@ -136,3 +136,13 @@ target_link_libraries(test_kinematics_solver
   hy_manipulation_controllers
   ${catkin_LIBRARIES}
 )
+add_executable(test_cartesian_trajectory src/test/test_cartesian_trajectory.cc)
+target_link_libraries(test_cartesian_trajectory
+  hy_manipulation_controllers
+  ${catkin_LIBRARIES}
+)
+add_executable(test_my_scara_controller src/test/test_my_scara_controller.cc)
+target_link_libraries(test_my_scara_controller
+  hy_manipulation_controllers
+  ${catkin_LIBRARIES}
+)

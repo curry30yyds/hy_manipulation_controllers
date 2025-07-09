@@ -9,6 +9,7 @@ namespace hy_manipulation_controllers
     {
         joint_control_params_ = _joint_control_params;
         motion_controller_state_ = MCS_STOPPED;
+        LOG_INFO("MotionControllerBase constructed.");
     }
 
     MotionControllerBase::~MotionControllerBase()

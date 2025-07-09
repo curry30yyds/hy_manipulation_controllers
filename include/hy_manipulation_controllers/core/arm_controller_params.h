@@ -37,6 +37,40 @@ namespace hy_manipulation_controllers
       max_acc = _max_acc;
       control_mode = _control_mode;
     }
+    static bool loadFromJson(const std::string &filepath, std::vector<JointControlParams> &params_out)
+    {
+      try
+      {
+        std::ifstream file(filepath);
+        if (!file.is_open())
+        {
+          LOG_ERROR("Failed to open joint control parameters file: {}", filepath);
+          return false;
+        }
+
+        nlohmann::json j;
+        file >> j;
+
+        for (const auto &joint : j.at("joints"))
+        {
+          JointControlParams p;
+          p.id = joint.at("id").get<int>();
+          p.type = joint.at("type").get<std::string>();
+          p.reduction_ratio = joint.at("reduction_ratio").get<float>();
+          p.max_vel = joint.at("max_vel").get<float>();
+          p.max_acc = joint.at("max_acc").get<float>();
+          p.control_mode = joint.at("control_mode").get<std::string>();
+          params_out.push_back(p);
+        }
+
+        return true;
+      }
+      catch (const std::exception &e)
+      {
+        LOG_ERROR("Failed to load joint control parameters: {}", e.what());
+        return false;
+      }
+    }
 
   public:
     int id;

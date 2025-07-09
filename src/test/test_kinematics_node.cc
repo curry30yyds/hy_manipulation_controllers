@@ -80,6 +80,8 @@ int main(int argc, char **argv)
                   << joint_angles.transpose() << std::endl;
         std::cout << "\n[FK] Resulting End Effector Pose:\n"
                   << end_pose.GetMatrix4f() << std::endl;
+        std::cout << "\n[FK] Resulting End Effector Pose:\n"
+                  << end_pose << std::endl;
     }
     else
     {

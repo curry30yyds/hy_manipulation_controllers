@@ -9,11 +9,12 @@
 #include <queue>
 #include <trac_ik/trac_ik.hpp>
 #include <random>
-
+#include <kdl/velocityprofile_spline.hpp>
 #include "hy_common/geometry/core/transform.h"
 #include <hy_common/logger/logger.h>
 #include "hy_manipulation_controllers/utils/config.h"
 #include "hy_manipulation_controllers/core/arm_controller_params.h"
+#include "hy_manipulation_controllers/motion_controller/joint_trajectory_controller.h"
 // #include "hy_manipulation_controllers/core/arm_controller.h"
 
 namespace hy_manipulation_controllers
@@ -38,15 +39,15 @@ namespace hy_manipulation_controllers
     bool SolveIK(const hy_common::geometry::Transform3D &_end_pose_in,
                  Eigen::VectorXf &_joint_positions_out);
 
-    bool InterpolateTrajectory(const Eigen::VectorXf &_start_joints,
-                               const Eigen::VectorXf &_end_joints,
-                               std::vector<KDL::JntArray> &trajectory,
-                               double duration,
-                               int num_steps);
-    // bool InterpolateTrajectory(const std::vector<Eigen::VectorXf> &_trajectory_joints,
+    // bool InterpolateTrajectory(const Eigen::VectorXf &_start_joints,
+    //                            const Eigen::VectorXf &_end_joints,
     //                            std::vector<KDL::JntArray> &trajectory,
     //                            double duration,
     //                            int num_steps);
+    bool InterpolateTrajectory(const std::vector<Eigen::VectorXf> &_trajectory_joints,
+                               JointTrajectory &trajectory,
+                               double duration,
+                               int num_steps);
 
     bool SamplePose(Eigen::Matrix4f &_sampled_pose_out);
 

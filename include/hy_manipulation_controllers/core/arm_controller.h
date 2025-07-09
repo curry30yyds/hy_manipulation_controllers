@@ -274,8 +274,6 @@ namespace hy_manipulation_controllers
 
         void JointStateCallback(const hy_hardware_interface::test_dm_4dof_state::ConstPtr &msg);
 
-        void JointCmdsCallback(const hy_hardware_interface::test_dm_4dof_control::ConstPtr &msg);
-
     private:
         std::unique_ptr<ros::NodeHandle> nh_;
         std::mutex joints_mutex_;
@@ -291,6 +289,7 @@ namespace hy_manipulation_controllers
 
         std::string urdf_path;
         std::string cam_params_json_path;
+        std::string joint_params_json_path;
 
         ArmControllerState control_state_;
 
@@ -299,6 +298,18 @@ namespace hy_manipulation_controllers
 
         ros::Subscriber joint_states_sub_;
         ros::Publisher joint_cmds_pub_;
+
+        bool joint_state_received_ = false;
+        struct JointStateHistoryEntry
+        {
+            ros::Time timestamp;
+            std::vector<JointState> joint_states;
+        };
+        std::deque<JointStateHistoryEntry> joint_state_history_;
+
+        JointTrajectory current_trajectory_;
+
+        std::vector<Eigen::VectorXf> trajectory_joints;
     };
 
 } // namespace hy_manipulation_controllers
