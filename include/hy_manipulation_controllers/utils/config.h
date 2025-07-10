@@ -11,4 +11,4 @@
 #define USE_LICENSE 0
 
 // Directory
-#define DK_SOURCE_DIR "/home/zzz/dm_ws/src/hy_manipulation_controllers"
+#define DK_SOURCE_DIR "/home/dangkang/catkin_strawberry_picking/src/hy_manipulation_controllers"

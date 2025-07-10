@@ -1,141 +1,111 @@
 #include "hy_manipulation_controllers/motion_controller/joint_trajectory_controller.h"
+
 #include <algorithm>
 #include <chrono>
 #include <thread>
 
-namespace hy_manipulation_controllers
-{
+namespace hy_manipulation_controllers {
 
-    JointTrajectoryController::JointTrajectoryController(const std::vector<JointControlParams> &_joint_control_params)
-        : MotionControllerBase(_joint_control_params)
-    {
-        motion_controller_type = MCT_JOINT_TRAJECTORY;
-        num_joints_ = _joint_control_params.size();
-        if (num_joints_ == 0)
-        {
-            LOG_ERROR("JointTrajectoryController initialized with zero joints!");
-            motion_controller_state_ = MCS_ERROR;
-        }
-        LOG_INFO("JointTrajectoryController constructed for {} joints.", num_joints_);
+JointTrajectoryController::JointTrajectoryController(
+    const std::vector<JointControlParams> &_joint_control_params)
+    : MotionControllerBase(_joint_control_params) {
+  motion_controller_type = MCT_JOINT_TRAJECTORY;
+  num_joints_ = _joint_control_params.size();
+  if (num_joints_ == 0) {
+    LOG_ERROR("JointTrajectoryController initialized with zero joints!");
+    motion_controller_state_ = MCS_ERROR;
+  }
+  LOG_INFO("JointTrajectoryController constructed for {} joints.", num_joints_);
+}
+
+JointTrajectoryController::~JointTrajectoryController() {}
+
+void JointTrajectoryController::SetTrajectory(
+    const JointTrajectory &_joint_trajectory) {
+  if (num_joints_ == 0) {
+    LOG_ERROR("Cannot set trajectory, controller has zero joints.");
+    motion_controller_state_ = MCS_ERROR;
+    return;
+  }
+
+  if (!_joint_trajectory.empty() &&
+      _joint_trajectory.size() % num_joints_ != 0) {
+    LOG_ERROR(
+        "Invalid trajectory size. Total points {} is not a multiple of number "
+        "of joints {}.",
+        _joint_trajectory.size(), num_joints_);
+    motion_controller_state_ = MCS_ERROR;
+    return;
+  }
+  joint_trajectory_ = _joint_trajectory;
+  trajectory_index_ = 0;
+  motion_controller_state_ = MCS_STOPPED;
+  if (joint_trajectory_.empty()) {
+    LOG_INFO("Trajectory has been cleared.");
+  } else {
+    LOG_INFO("New trajectory set with {} timesteps.",
+             joint_trajectory_.size() / num_joints_);
+  }
+}
+
+void JointTrajectoryController::Start(bool _block_flag) {
+  if (motion_controller_state_ == MCS_RUNNING) {
+    LOG_WARN("Controller is already running.");
+    return;
+  }
+  if (joint_trajectory_.empty()) {
+    LOG_WARN("Cannot start, trajectory is empty.");
+    return;
+  }
+
+  trajectory_index_ = 0;
+  motion_controller_state_ = MCS_RUNNING;
+  LOG_INFO("JointTrajectoryController started.");
+
+  if (_block_flag) {
+    ros::Rate poll_rate(100);
+    while (ros::ok() && motion_controller_state_ == MCS_RUNNING) {
+      poll_rate.sleep();
     }
+    LOG_INFO("Blocking call finished. Controller state: {}",
+             motion_controller_state_);
+  }
+}
+void JointTrajectoryController::Update(
+    const std::vector<JointState> &_joint_states,
+    std::vector<JointControlCommand> &_joint_control_commands) {
+  if (motion_controller_state_ != MCS_RUNNING) {
+    _joint_control_commands.clear();
+    return;
+  }
+  size_t start_idx = trajectory_index_ * num_joints_;
 
-    JointTrajectoryController::~JointTrajectoryController()
-    {
-    }
+  // 检查是否已执行完所有时间步
+  if (start_idx >= joint_trajectory_.size()) {
+    LOG_INFO("Trajectory finished.");
+    motion_controller_state_ = MCS_STOPPED;
+    _joint_control_commands.clear();
+    return;
+  }
 
-    void JointTrajectoryController::SetTrajectory(const JointTrajectory &_joint_trajectory)
-    {
-        if (num_joints_ == 0)
-        {
-            LOG_ERROR("Cannot set trajectory, controller has zero joints.");
-            motion_controller_state_ = MCS_ERROR;
-            return;
-        }
+  _joint_control_commands.resize(num_joints_);
 
-        if (!_joint_trajectory.empty() && _joint_trajectory.size() % num_joints_ != 0)
-        {
-            LOG_ERROR("Invalid trajectory size. Total points {} is not a multiple of number of joints {}.",
-                      _joint_trajectory.size(), num_joints_);
-            motion_controller_state_ = MCS_ERROR;
-            return;
-        }
-        joint_trajectory_ = _joint_trajectory;
-        trajectory_index_ = 0;
-        motion_controller_state_ = MCS_STOPPED;
-        if (joint_trajectory_.empty())
-        {
-            LOG_INFO("Trajectory has been cleared.");
-        }
-        else
-        {
-            LOG_INFO("New trajectory set with {} timesteps.", joint_trajectory_.size() / num_joints_);
-        }
-    }
+  for (int i = 0; i < num_joints_; ++i) {
+    const auto &target_point = joint_trajectory_[start_idx + i];
+    _joint_control_commands[i].id = target_point.id;
+    _joint_control_commands[i].target_position = target_point.position;
+    _joint_control_commands[i].target_velocity = target_point.velocity;
+  }
 
-    void JointTrajectoryController::Start(bool _block_flag)
-    {
-        if (motion_controller_state_ == MCS_RUNNING)
-        {
-            LOG_WARN("Controller is already running.");
-            return;
-        }
-        if (joint_trajectory_.empty())
-        {
-            LOG_WARN("Cannot start, trajectory is empty.");
-            return;
-        }
+  trajectory_index_++;
+}
 
-        trajectory_index_ = 0;
-        motion_controller_state_ = MCS_RUNNING;
-        LOG_INFO("JointTrajectoryController started.");
+void JointTrajectoryController::Stop(float _duration) {
+  if (motion_controller_state_ == MCS_STOPPED) {
+    return;
+  }
 
-        if (_block_flag)
-        {
-            ros::Rate poll_rate(100);
-            while (ros::ok() && motion_controller_state_ == MCS_RUNNING)
-            {
-                poll_rate.sleep();
-            }
-            LOG_INFO("Blocking call finished. Controller state: {}", motion_controller_state_);
-        }
-    }
-    void JointTrajectoryController::Update(const std::vector<JointState> &_joint_states,
-                                           std::vector<JointControlCommand> &_joint_control_commands)
-    {
+  motion_controller_state_ = MCS_STOPPED;
+}
 
-        if (motion_controller_state_ != MCS_RUNNING)
-        {
-            _joint_control_commands.clear();
-            return;
-        }
-        size_t start_idx = trajectory_index_ * num_joints_;
-
-        // 检查是否已执行完所有时间步
-        if (start_idx >= joint_trajectory_.size())
-        {
-            LOG_INFO("Trajectory finished.");
-            motion_controller_state_ = MCS_STOPPED;
-            _joint_control_commands.clear();
-            return;
-        }
-
-        _joint_control_commands.resize(num_joints_);
-
-        for (int i = 0; i < num_joints_; ++i)
-        {
-            const auto &target_point = joint_trajectory_[start_idx + i];
-            _joint_control_commands[i].id = target_point.id;
-            _joint_control_commands[i].target_position = target_point.position;
-            _joint_control_commands[i].target_velocity = target_point.velocity;
-        }
-
-        trajectory_index_++;
-        LOG_INFO("Current trajectory_index is {}", trajectory_index_);
-        // float current_time = ros::Time::now().toSec();
-
-        // for (size_t i = 0; i < _joint_states.size(); ++i)
-        // {
-        //     const auto &state = _joint_states[i];
-
-        //     JointTrajectoryPoint point;
-        //     point.id = state.id;
-        //     point.position = state.position;
-        //     point.velocity = state.velocity;
-        //     point.acceleration = 0.0f;
-        //     point.timestamp = current_time;
-
-        //     joint_trajectory_.insert(joint_trajectory_.begin(), point);
-        // }
-    }
-
-    void JointTrajectoryController::Stop(float _duration)
-    {
-        if (motion_controller_state_ == MCS_STOPPED)
-        {
-            return;
-        }
-
-        motion_controller_state_ = MCS_STOPPED;
-    }
-
-} // namespace hy_manipulation_controllers
+}  // namespace hy_manipulation_controllers
