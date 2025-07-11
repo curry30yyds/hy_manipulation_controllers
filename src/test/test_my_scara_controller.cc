@@ -32,17 +32,6 @@ int main(int argc, char **argv) {
 
   arm_controller->Connect();
 
-  // 等待第一次接收到关节状态
-  ros::Time start_time = ros::Time::now();
-  while (!arm_controller->HasJointStateReceived()) {
-    if ((ros::Time::now() - start_time).toSec() > 2.0) {
-      LOG_ERROR("Timeout: No joint state received within 2 seconds.");
-      return 1;
-    }
-    ros::Rate(100).sleep();
-  }
-  LOG_INFO("Joint state received, ready to proceed.");
-
   // 构造目标末端轨迹
   std::vector<hy_common::geometry::Transform3D> target_trajectory_poses;
   for (int i = 1; i <= 4; ++i) {
@@ -50,7 +39,11 @@ int main(int argc, char **argv) {
     for (size_t j = 0; j < 4; ++j) {
       joint_angles(j) = 0.1f * (j + 1.5 * i);
     }
-
+    //实际的角度
+    // 0：[0.15,0.30,0.45,0.60]
+    // 1：[0.25,0.40,0.55,0.70]
+    // 2：[0.35,0.50,0.65,0.80]
+    // 3：[0.45,0.60,0.75,0.90]
     hy_common::geometry::Transform3D end_pose;
     if (arm_controller->SolveFK(joint_angles, end_pose)) {
       target_trajectory_poses.push_back(end_pose);

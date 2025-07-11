@@ -146,3 +146,8 @@ target_link_libraries(test_my_scara_controller
   hy_manipulation_controllers
   ${catkin_LIBRARIES}
 )
+add_executable(test_drag_controller src/test/test_drag_controller.cc)
+target_link_libraries(test_drag_controller
+  hy_manipulation_controllers
+  ${catkin_LIBRARIES}
+)

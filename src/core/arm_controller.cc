@@ -1,7 +1,5 @@
 #include "hy_manipulation_controllers/core/arm_controller.h"
 
-#include "hy_manipulation_controllers/motion_controller/joint_trajectory_controller.h"
-
 namespace hy_manipulation_controllers {
 
 ArmController::ArmController(const std::string &_namespace,
@@ -129,14 +127,14 @@ bool ArmController::Initialize() {
   LOG_INFO("[ArmController] KinematicsSolver initialized with {} joints.",
            num_joints);
   // 2.运动器初始化
-  std::vector<JointControlParams> joint_params;
-  if (!JointControlParams::loadFromJson(joint_params_json_path, joint_params)) {
+  if (!JointControlParams::loadFromJson(joint_params_json_path,
+                                        joint_params_)) {
     LOG_ERROR("Failed to load joint control parameters.");
     return false;
   }
 
   motion_controller_current_ =
-      std::make_shared<JointTrajectoryController>(joint_params);
+      std::make_shared<StaticController>(joint_params_);
   // 3. 底层硬件初始化
   ros::Time start_time = ros::Time::now();
   ros::Rate r(50);
@@ -167,7 +165,13 @@ void ArmController::ControlThread() {
     UpdateArmStateMsgs();
 
     // 2. 更新机械臂控制命令
-    motion_controller_current_->Update(joint_states_, joint_control_commands_);
+    {
+      std::lock_guard<std::mutex> lock(motion_controller_mutex_);
+      if (motion_controller_current_) {
+        motion_controller_current_->Update(joint_states_,
+                                           joint_control_commands_);
+      }
+    }
 
     // 3. 更新运动控制器状态
     UpdateMotionControllerState();
@@ -210,22 +214,21 @@ void ArmController::PublishArmControlMsgs() {
 
     ros_cmd_frame.p_des = internal_cmd.target_position;
     ros_cmd_frame.v_des = internal_cmd.target_velocity;
+    ros_cmd_frame.kp = internal_cmd.mit_kp;
+    ros_cmd_frame.kd = internal_cmd.mit_kd;
 
-    ros_cmd_frame.kp = 5.0f;
-    ros_cmd_frame.kd = 0.5f;
-
-    ros_cmd_frame.t_ff = 0.0f;
+    ros_cmd_frame.t_ff = internal_cmd.mit_t_ff;
   }
 
   joint_cmds_pub_.publish(cmd_msg);
 }
 
 void ArmController::UpdateArmTf() {
-  // TODO: 实现 TF 更新逻辑
+  //实现 TF 更新逻辑
 }
 
 void ArmController::UpdateMotionControllerState() {
-  // TODO: 实现运动控制状态更新逻辑
+  //实现运动控制状态更新逻辑
 }
 
 void ArmController::UpdateArmControllerState() {}
@@ -237,7 +240,7 @@ void ArmController::UpdateArmStateMsgs() {
     return;
   }
 
-  // std::lock_guard<std::mutex> lock(joint_state_mutex_);
+  std::lock_guard<std::mutex> lock(joint_state_mutex_);
 
   if ((ros::Time::now() - last_state_timestamp_).toSec() > 0.03) {
     // 超时 启动静止控制
@@ -390,9 +393,26 @@ void ArmController::DoCartesianTrajectoryControl(
            sparse_joint_trajectory.size());
 
   kinematics_solver_->InterpolateTrajectory(sparse_joint_trajectory,
-                                            current_trajectory_, 2.0, 400);
-  motion_controller_current_->SetTrajectory(current_trajectory_);
-  motion_controller_current_->Start();
+                                            current_trajectory_, 8.0, 1600);
+  //保存轨迹
+  auto now = std::chrono::system_clock::now();
+  auto in_time_t = std::chrono::system_clock::to_time_t(now);
+  std::stringstream ss;
+  ss << "trajectory_"
+     << std::put_time(std::localtime(&in_time_t), "%Y%m%d_%H%M%S") << ".csv";
+  SaveTrajectoryToFile(current_trajectory_, ss.str());
+
+  {
+    std::lock_guard<std::mutex> lock(motion_controller_mutex_);
+
+    motion_controller_current_ =
+        std::make_shared<JointTrajectoryController>(joint_params_);
+
+    motion_controller_current_->SetTrajectory(current_trajectory_);
+
+    motion_controller_current_->Start();
+  }
+
   if (_block_flag) {
     LOG_INFO("Blocking until trajectory is complete...");
     ros::Rate poll_rate(100);
@@ -416,5 +436,95 @@ void ArmController::DoCartesianTrajectoryControl(
   //   }
   // }
 }
+bool ArmController::SaveTrajectoryToFile(const JointTrajectory &_trajectory,
+                                         const std::string &_filename) {
+  if (_trajectory.empty()) {
+    LOG_WARN("Trajectory is empty, nothing to save.");
+    return false;
+  }
 
+  std::ofstream file_stream(_filename);
+  if (!file_stream.is_open()) {
+    LOG_ERROR("Failed to open file to save trajectory: {}", _filename);
+    return false;
+  }
+
+  file_stream << std::fixed << std::setprecision(6);
+
+  const int num_joints = kinematics_solver_->GetChain().getNrOfJoints();
+  file_stream << "timestamp";
+  for (int i = 0; i < num_joints; ++i) {
+    file_stream << ",j" << i << "_pos,j" << i << "_vel,j" << i << "_acc";
+  }
+  file_stream << "\n";
+
+  for (size_t i = 0; i < _trajectory.size(); i += num_joints) {
+    file_stream << _trajectory[i].timestamp;
+
+    for (int j = 0; j < num_joints; ++j) {
+      const auto &point = _trajectory[i + j];
+      file_stream << "," << point.position << "," << point.velocity << ","
+                  << point.acceleration;
+    }
+    file_stream << "\n";
+  }
+
+  file_stream.close();
+  LOG_INFO("Trajectory successfully saved to: {}", _filename);
+  return true;
+}
+void ArmController::StartStaticMode(const float &_stiffness) {
+  LOG_INFO("Request to start Static Mode.");
+
+  std::lock_guard<std::mutex> lock(motion_controller_mutex_);
+
+  motion_controller_current_ =
+      std::make_shared<StaticController>(joint_params_);
+  motion_controller_current_->Start();
+}
+
+void ArmController::StopStaticMode() {
+  LOG_INFO(
+      "Stopping Static Mode is equivalent to starting it again to hold "
+      "position.");
+
+  StartStaticMode(1.0f);
+}
+
+void ArmController::StartDragMode(const float &_stiffness) {
+  LOG_INFO("Request to start Drag Mode.");
+
+  std::lock_guard<std::mutex> lock(motion_controller_mutex_);
+
+  motion_controller_current_ =
+      std::make_shared<DragController>(joint_params_, kinematics_solver_);
+  motion_controller_current_->Start();
+}
+
+void ArmController::StopDragMode() {
+  LOG_INFO("Request to stop Drag Mode. Arm will hold its current position.");
+
+  StartStaticMode(1.0f);
+}
+
+// 点动模式 还没有实现
+void ArmController::StartJoggingMode(const float &_vel_percentage,
+                                     const float &_stiffness) {
+  LOG_WARN("Jogging mode is not fully implemented yet.");
+}
+
+void ArmController::SetJoggingJointTarget(
+    const Eigen::VectorXf &_joint_target) {
+  LOG_WARN("Jogging mode is not fully implemented yet.");
+}
+
+void ArmController::SetJoggingPoseTarget(
+    const hy_common::geometry::Transform3D &_pose_target) {
+  LOG_WARN("Jogging mode is not fully implemented yet.");
+}
+
+void ArmController::StopJoggingMode() {
+  LOG_INFO("Request to stop Jogging Mode. Arm will hold its current position.");
+  StartStaticMode(1.0f);
+}
 }  // namespace hy_manipulation_controllers

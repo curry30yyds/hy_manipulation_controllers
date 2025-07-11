@@ -9,7 +9,6 @@ namespace hy_manipulation_controllers {
 JointTrajectoryController::JointTrajectoryController(
     const std::vector<JointControlParams> &_joint_control_params)
     : MotionControllerBase(_joint_control_params) {
-  motion_controller_type = MCT_JOINT_TRAJECTORY;
   num_joints_ = _joint_control_params.size();
   if (num_joints_ == 0) {
     LOG_ERROR("JointTrajectoryController initialized with zero joints!");
@@ -90,12 +89,36 @@ void JointTrajectoryController::Update(
 
   _joint_control_commands.resize(num_joints_);
 
+  //单独位置控制
   for (int i = 0; i < num_joints_; ++i) {
     const auto &target_point = joint_trajectory_[start_idx + i];
     _joint_control_commands[i].id = target_point.id;
     _joint_control_commands[i].target_position = target_point.position;
-    _joint_control_commands[i].target_velocity = target_point.velocity;
+    _joint_control_commands[i].target_velocity = 0.0f;
+    _joint_control_commands[i].mit_kp = 15.0f;
+    _joint_control_commands[i].mit_kd = 1.0f;
+    _joint_control_commands[i].mit_t_ff = 0.0f;
   }
+
+  //闭环速度控制
+  // for (int i = 0; i < num_joints_; ++i) {
+  //   const auto &target_point = joint_trajectory_[start_idx + i];
+  //   double err_pos = target_point.position - _joint_states[i].position;
+  //   double err_vel = target_point.velocity - _joint_states[i].velocity;
+  //   double t_ff = ff_gain_ * target_point.velocity;
+  //   double v_ctrl = t_ff + err_pos * Kp_ + err_vel * Kd_;
+  //   if (std::isnan(v_ctrl)) {
+  //     LOG_ERROR("NaN control output detected for joint {}", i);
+  //     v_ctrl = 0.0;
+  //   }
+  //   v_ctrl = std::max(-v_max, std::min(v_ctrl, v_max));
+  //   _joint_control_commands[i].id = target_point.id;
+  //   _joint_control_commands[i].target_position = target_point.position;
+  //   _joint_control_commands[i].target_velocity = v_ctrl;
+  //   _joint_control_commands[i].mit_kp = 15.0f;
+  //   _joint_control_commands[i].mit_kd = 1.0f;
+  //   _joint_control_commands[i].mit_t_ff = 0.0f;
+  // }
 
   trajectory_index_++;
 }

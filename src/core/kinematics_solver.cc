@@ -148,6 +148,16 @@ bool KinematicsSolver::Initialize() {
     return false;
   }
 
+  gravity_vector_ = KDL::Vector(0.0, 0.0, -9.81);
+
+  // 创建并初始化逆动力学求解器
+  id_solver_ =
+      std::make_unique<KDL::ChainIdSolver_RNE>(chain_, gravity_vector_);
+  if (!id_solver_) {
+    LOG_ERROR("Initialization failed: Could not create ID solver.");
+    return false;
+  }
+
   return true;
 }
 
@@ -193,7 +203,7 @@ bool KinematicsSolver::SolveIK(
     Eigen::VectorXf &_joint_positions_out) {
   const size_t num_joints = chain_.getNrOfJoints();
 
-  // 使用零向量作为初始猜值（也可改为上一次解的值）
+  // 使用零向量作为初始猜值
   KDL::JntArray q_init(num_joints);
   for (size_t i = 0; i < num_joints; ++i) {
     q_init(i) = 0.0;
@@ -224,7 +234,46 @@ bool KinematicsSolver::SolveIK(
   LOG_ERROR("IK solver failed to find solution.");
   return false;
 }
+bool KinematicsSolver::SolveGravity(const Eigen::VectorXf &_joint_positions_in,
+                                    Eigen::VectorXf &_gravity_torques_out) {
+  const size_t num_joints = chain_.getNrOfJoints();
+  if (_joint_positions_in.size() != num_joints) {
+    LOG_ERROR("SolveGravity Error: Expected {} joints, but got {}.", num_joints,
+              _joint_positions_in.size());
+    return false;
+  }
 
+  KDL::JntArray q(num_joints);  // 关节位置
+  for (size_t i = 0; i < num_joints; ++i) {
+    q(i) = _joint_positions_in(i);
+  }
+
+  // 在纯重力补偿计算中，关节速度和加速度均为0
+  KDL::JntArray qd(num_joints);
+  KDL::JntArray qdd(num_joints);
+  SetToZero(qd);
+  SetToZero(qdd);
+
+  // 外部作用在末端的力，这里假设为0
+  std::vector<KDL::Wrench> f_ext(chain_.getNrOfSegments(), KDL::Wrench::Zero());
+
+  // 调用求解器
+  KDL::JntArray gravity_kdl(num_joints);
+  int status = id_solver_->CartToJnt(q, qd, qdd, f_ext, gravity_kdl);
+
+  if (status != 0) {
+    LOG_ERROR("ID solver failed with status code: {}", status);
+    return false;
+  }
+
+  //转换结果到 Eigen 向量
+  _gravity_torques_out.resize(num_joints);
+  for (size_t i = 0; i < num_joints; ++i) {
+    _gravity_torques_out(i) = gravity_kdl(i);
+  }
+
+  return true;
+}
 bool KinematicsSolver::InterpolateTrajectory(
     const std::vector<Eigen::VectorXf> &_trajectory_joints,
     JointTrajectory &trajectory, double duration, int num_steps) {
@@ -250,7 +299,8 @@ bool KinematicsSolver::InterpolateTrajectory(
   }
 
   trajectory.clear();
-  trajectory.reserve(num_steps);
+
+  trajectory.reserve(num_steps * num_joints);
 
   std::vector<std::vector<double>> joint_points(
       num_joints, std::vector<double>(num_waypoints));
@@ -261,22 +311,40 @@ bool KinematicsSolver::InterpolateTrajectory(
   }
 
   double segment_duration = duration / (num_waypoints - 1);
+  if (segment_duration <= 1e-6) {
+    LOG_ERROR(
+        "Segment duration is too small. Check total duration and number of "
+        "waypoints.");
+    return false;
+  }
+
   std::vector<std::vector<double>> velocities(
+      num_joints, std::vector<double>(num_waypoints, 0.0));
+  std::vector<std::vector<double>> accelerations(
       num_joints, std::vector<double>(num_waypoints, 0.0));
 
   for (size_t j = 0; j < num_joints; ++j) {
-    // 起始点和结束点速度为0
+    // 轨迹的起点和终点，速度和加速度都为零
     velocities[j][0] = 0.0;
     velocities[j][num_waypoints - 1] = 0.0;
+    accelerations[j][0] = 0.0;
+    accelerations[j][num_waypoints - 1] = 0.0;
 
-    // 计算中间路径点的速度  待定
+    // 中间路径点的速度和加速度  中间差速 确保连续
     for (size_t i = 1; i < num_waypoints - 1; ++i) {
       double p_prev = joint_points[j][i - 1];
+      double p_curr = joint_points[j][i];
       double p_next = joint_points[j][i + 1];
+
+      // v(i) ≈ (p(i+1) - p(i-1)) / (2*h)
       velocities[j][i] = (p_next - p_prev) / (2.0 * segment_duration);
-      // velocities[j][i] = 0.0;
+
+      // a(i) ≈ (p(i+1) - 2*p(i) + p(i-1)) / h^2
+      accelerations[j][i] = (p_next - 2.0 * p_curr + p_prev) /
+                            (segment_duration * segment_duration);
     }
   }
+
   double start_time_sec = ros::Time::now().toSec();
   std::vector<KDL::VelocityProfile_Spline> splines(num_joints);
   double dt = duration / (num_steps - 1);
@@ -284,22 +352,23 @@ bool KinematicsSolver::InterpolateTrajectory(
 
   for (int i = 0; i < num_steps; ++i) {
     double t = i * dt;
-
-    // 确定当前时间 t 所在的轨迹段索引
     int seg_idx = (t >= duration) ? (num_waypoints - 2)
                                   : static_cast<int>(t / segment_duration);
+    seg_idx = std::max(0, std::min(seg_idx, (int)num_waypoints - 2));
 
-    // 如果进入了一个新的段，则为新段重新配置样条曲线
     if (seg_idx != last_seg_idx) {
       for (size_t j = 0; j < num_joints; ++j) {
+        // 获取当前段的起点和终点边界条件
         double p0 = joint_points[j][seg_idx];
         double v0 = velocities[j][seg_idx];
+        double a0 = accelerations[j][seg_idx];
+
         double p1 = joint_points[j][seg_idx + 1];
         double v1 = velocities[j][seg_idx + 1];
+        double a1 = accelerations[j][seg_idx + 1];
 
-        // 起始和结束加速度都设为0
-        splines[j].SetProfileDuration(p0, v0, 0.0, p1, v1, 0.0,
-                                      segment_duration);
+        // 使用精确的边界条件来配置样条曲线
+        splines[j].SetProfileDuration(p0, v0, a0, p1, v1, a1, segment_duration);
       }
       last_seg_idx = seg_idx;
     }
@@ -317,11 +386,11 @@ bool KinematicsSolver::InterpolateTrajectory(
       trajectory.push_back(point);
     }
   }
-
+  LOG_INFO("num_waypoints:{},segment_duration:{}", num_waypoints,
+           segment_duration);
   if (trajectory.size() >= num_joints) {
     const auto &target_point_vec = _trajectory_joints.back();
     for (size_t j = 0; j < num_joints; ++j) {
-      // 定位到最后一个时间戳的对应关节
       JointTrajectoryPoint &last_point =
           trajectory[trajectory.size() - num_joints + j];
       last_point.position = target_point_vec(j);

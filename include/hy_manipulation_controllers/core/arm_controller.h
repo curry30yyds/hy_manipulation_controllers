@@ -17,7 +17,10 @@
 
 #include "hy_manipulation_controllers/core/arm_controller_params.h"
 #include "hy_manipulation_controllers/kinematics/kinematics_solver.h"
+#include "hy_manipulation_controllers/motion_controller/drag_controller.h"
+#include "hy_manipulation_controllers/motion_controller/joint_trajectory_controller.h"
 #include "hy_manipulation_controllers/motion_controller/motion_controller_base.h"
+#include "hy_manipulation_controllers/motion_controller/static_controller.h"
 #include "hy_manipulation_controllers/utils/config.h"
 namespace hy_manipulation_controllers {
 
@@ -83,8 +86,8 @@ class ArmController {
         return "UNKNOWN";
     }
   }
-
-  bool HasJointStateReceived() const { return joint_state_received_; }
+  bool SaveTrajectoryToFile(const JointTrajectory &_trajectory,
+                            const std::string &_filename);
 
  public:
   /**
@@ -276,6 +279,7 @@ class ArmController {
  private:
   std::unique_ptr<ros::NodeHandle> nh_;
   std::mutex joint_state_mutex_;
+  std::mutex motion_controller_mutex_;
   std::shared_ptr<MotionControllerBase> motion_controller_current_;
   std::shared_ptr<MotionControllerBase> motion_controller_next_;
 
@@ -311,6 +315,7 @@ class ArmController {
   std::vector<Eigen::VectorXf> trajectory_joints;
 
   ros::Time last_state_timestamp_;
+  std::vector<JointControlParams> joint_params_;
 };
 
 }  // namespace hy_manipulation_controllers
