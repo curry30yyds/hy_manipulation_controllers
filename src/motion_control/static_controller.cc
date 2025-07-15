@@ -48,8 +48,8 @@ void StaticController::Update(
     _joint_control_commands[i].id = static_cast<int>(i);
     _joint_control_commands[i].target_position = target_positions_(i);
     _joint_control_commands[i].target_velocity = 0.0f;
-    _joint_control_commands[i].mit_kp = 5.0f;
-    _joint_control_commands[i].mit_kd = 0.2f;
+    _joint_control_commands[i].mit_kp = 1.0f;
+    _joint_control_commands[i].mit_kd = 0.1f;
     _joint_control_commands[i].mit_t_ff = 0.0f;
   }
 }
