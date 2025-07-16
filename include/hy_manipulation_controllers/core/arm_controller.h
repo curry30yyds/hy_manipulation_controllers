@@ -9,6 +9,7 @@
 #include <Eigen/Core>
 #include <Eigen/Dense>
 #include <fstream>
+#include <kdl/velocityprofile_trap.hpp>
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <string>

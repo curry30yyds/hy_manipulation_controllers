@@ -95,8 +95,8 @@ void JointTrajectoryController::Update(
     _joint_control_commands[i].id = target_point.id;
     _joint_control_commands[i].target_position = target_point.position;
     _joint_control_commands[i].target_velocity = 0.0f;
-    _joint_control_commands[i].mit_kp = 15.0f;
-    _joint_control_commands[i].mit_kd = 1.0f;
+    _joint_control_commands[i].mit_kp = 10.0f;
+    _joint_control_commands[i].mit_kd = 0.2f;
     _joint_control_commands[i].mit_t_ff = 0.0f;
   }
 

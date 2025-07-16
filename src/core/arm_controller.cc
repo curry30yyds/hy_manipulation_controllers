@@ -326,37 +326,96 @@ void ArmController::DoJointPositionControl(
     return;
   }
 
-  JointTrajectory trajectory;
-  JointTrajectoryPoint point;
-  ros::Time start_time = ros::Time::now();
-  point.timestamp = 0.0f;
-
-  for (size_t i = 0; i < _target_joint_positions.size(); ++i) {
-    point.id = static_cast<int>(i);
-    point.position = _target_joint_positions(i);
-    point.velocity = _vel_percentage;
-    point.acceleration = _vel_percentage / _acc_duration;
+  Eigen::VectorXf current_joints(joint_states_.size());
+  for (size_t i = 0; i < joint_states_.size(); ++i) {
+    current_joints(i) = joint_states_[i].position;
   }
-  trajectory.push_back(point);
-
-  // motion_controller_current_->SetTrajectory(trajectory);
-
-  if (_block_flag) {
-    ros::Rate rate(200);
-    const double timeout = 5.0;
-    ros::Time wait_start = ros::Time::now();
-    while (ros::ok()) {
-      // if (motion_controller_current_->HasArrived())
-      // {
-      //   LOG_INFO("Joint Position Control: Target arrived.");
-      //   break;
-      // }
-      if ((ros::Time::now() - wait_start).toSec() > timeout) {
-        LOG_WARN("Joint Position Control: Timeout waiting for target.");
-        break;
-      }
-      rate.sleep();
+  std::vector<float> distances;
+  distances.resize(4);
+  float max_distance = -1.0;
+  int max_distance_joint = -1;
+  distances[0] = fabs(current_joints[0] - _target_joint_positions(0));
+  for (int i = 1; i < 4; i++) {
+    distances[i] = fabs(current_joints[i] - _target_joint_positions(i));
+    if (distances[i] > max_distance) {
+      max_distance = distances[i];
+      max_distance_joint = i;
     }
+  }
+
+  if (max_distance_joint == -1) {
+    return;
+  }
+
+  float move_time = fabs(max_distance / _vel_percentage);
+  if (max_distance < 0.02 || move_time < fabs(distances[0] / 5.0f)) {
+    move_time = fabs(distances[0] / 5.0f);
+    if (move_time < 1e-3) {
+      return;
+    }
+  }
+  if (move_time < 2 * _acc_duration) {
+    // 确保总时间至少是两倍的加速时间
+    LOG_WARN(
+        "Move time is too short for the given acceleration. Adjusting "
+        "move_time.");
+    move_time = 2 * _acc_duration;
+  }
+
+  // 为每个关节创建独立的速度曲线
+  std::vector<KDL::VelocityProfile_Trap> profiles;
+  for (int i = 0; i < current_joints.size(); ++i) {
+    double joint_travel_distance =
+        _target_joint_positions(i) - current_joints(i);
+
+    if (move_time <= _acc_duration) {
+      LOG_ERROR("move_time must be greater than _acc_duration.");
+      return;
+    }
+
+    double max_vel_joint = joint_travel_distance / (move_time - _acc_duration);
+    double max_acc_joint = max_vel_joint / _acc_duration;
+
+    KDL::VelocityProfile_Trap profile(fabs(max_vel_joint), fabs(max_acc_joint));
+    profile.SetProfile(0, joint_travel_distance);  // 设置起始位置和总位移
+    profiles.push_back(profile);
+  }
+
+  JointTrajectory generated_trajectory;  // 创建一个临时的轨迹容器
+  double control_frequency = 200.0;      // 控制器频率
+  double time_step = 1.0 / control_frequency;
+  size_t num_steps = static_cast<size_t>(move_time / time_step) + 1;
+  generated_trajectory.reserve(num_steps * current_joints.size());
+
+  double start_time_sec = ros::Time::now().toSec();  // 获取起始时间戳
+
+  for (double t = 0.0; t <= move_time; t += time_step) {
+    double timestamp = start_time_sec + t;
+    for (int j = 0; j < current_joints.size(); ++j) {
+      JointTrajectoryPoint point;
+      point.id = j;
+      point.timestamp = timestamp;
+      point.position = current_joints(j) + profiles[j].Pos(t);
+      point.velocity = profiles[j].Vel(t);
+      point.acceleration = profiles[j].Acc(t);
+
+      generated_trajectory.push_back(point);
+    }
+  }
+  auto now = std::chrono::system_clock::now();
+  auto in_time_t = std::chrono::system_clock::to_time_t(now);
+  std::stringstream ss;
+  ss << "trajectory_"
+     << std::put_time(std::localtime(&in_time_t), "%Y%m%d_%H%M%S") << ".csv";
+  SaveTrajectoryToFile(generated_trajectory, ss.str());
+  {
+    std::lock_guard<std::mutex> lock(motion_controller_mutex_);
+
+    motion_controller_current_ =
+        std::make_shared<JointTrajectoryController>(joint_params_);
+
+    motion_controller_current_->SetTrajectory(generated_trajectory);
+    motion_controller_current_->Start();
   }
 }
 void ArmController::DoCartesianTrajectoryControl(
@@ -391,9 +450,18 @@ void ArmController::DoCartesianTrajectoryControl(
   }
   LOG_INFO("Successfully solved IK for {} sparse points.",
            sparse_joint_trajectory.size());
-
-  kinematics_solver_->InterpolateTrajectory(sparse_joint_trajectory,
-                                            current_trajectory_, 8.0, 1600);
+  DoJointTrajectoryControl(sparse_joint_trajectory, _max_cartesian_vel,
+                           _acc_duration, _stiffness, _block_flag);
+}
+void ArmController::DoJointTrajectoryControl(
+    const std::vector<Eigen::VectorXf> &_target_trajectory_positions,
+    const float &_vel_percentage, const float &_acc_duration,
+    const float &_stiffness, const bool &_block_flag) {
+  // kinematics_solver_->InterpolateTrajectory(sparse_joint_trajectory,
+  //                                           current_trajectory_, 8.0, 1600);
+  kinematics_solver_->InterpolateTrajectory(
+      _target_trajectory_positions, current_trajectory_, _vel_percentage,
+      _acc_duration, 200);
   //保存轨迹
   auto now = std::chrono::system_clock::now();
   auto in_time_t = std::chrono::system_clock::to_time_t(now);
@@ -412,7 +480,6 @@ void ArmController::DoCartesianTrajectoryControl(
 
     motion_controller_current_->Start();
   }
-
   if (_block_flag) {
     LOG_INFO("Blocking until trajectory is complete...");
     ros::Rate poll_rate(100);

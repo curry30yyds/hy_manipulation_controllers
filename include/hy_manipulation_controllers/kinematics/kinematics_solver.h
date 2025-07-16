@@ -47,6 +47,11 @@ class KinematicsSolver {
       const std::vector<Eigen::VectorXf> &_trajectory_joints,
       JointTrajectory &trajectory, double duration, int num_steps);
 
+  bool InterpolateTrajectory(const std::vector<Eigen::VectorXf> &sparse_joints,
+                             JointTrajectory &trajectory,
+                             float max_joint_velocity, float acc_duration,
+                             float control_frequency);
+
   bool SamplePose(Eigen::Matrix4f &_sampled_pose_out);
 
   bool LoadCameraExtrinsics(const CameraExtrinsicParams &_params);

@@ -275,6 +275,159 @@ bool KinematicsSolver::SolveGravity(const Eigen::VectorXf &_joint_positions_in,
   return true;
 }
 bool KinematicsSolver::InterpolateTrajectory(
+    const std::vector<Eigen::VectorXf> &sparse_joints,
+    JointTrajectory &trajectory, float max_joint_velocity, float acc_duration,
+    float control_frequency) {
+  if (sparse_joints.size() < 2) {
+    LOG_ERROR("Trajectory must have at least two waypoints.");
+    return false;
+  }
+  if (max_joint_velocity <= 0.0f || control_frequency <= 0.0f) {
+    LOG_ERROR("Max joint velocity and control frequency must be positive.");
+    return false;
+  }
+
+  trajectory.clear();
+  const size_t num_waypoints = sparse_joints.size();
+  const size_t num_joints = sparse_joints[0].size();
+  for (const auto &jnt : sparse_joints) {
+    if (jnt.size() != num_joints) {
+      LOG_ERROR("All waypoints must have the same number of joints.");
+      return false;
+    }
+  }
+
+  // 动态计算每段轨迹的持续时间
+  std::vector<double> segment_durations;
+  double total_duration = 0.0;
+  for (size_t i = 0; i < num_waypoints - 1; ++i) {
+    const Eigen::VectorXf &q_start = sparse_joints[i];
+    const Eigen::VectorXf &q_end = sparse_joints[i + 1];
+
+    double max_angular_distance = 0.0;
+    for (size_t j = 0; j < num_joints; ++j) {
+      double angular_distance = std::abs(q_end(j) - q_start(j));
+      if (angular_distance > max_angular_distance) {
+        max_angular_distance = angular_distance;
+      }
+    }
+    double duration_0 = std::abs(q_end(0) - q_start(0)) /
+                        5.0;  // 移动关节最大速度达到所需要时间
+    double duration = 0.0;
+    if (max_angular_distance > 0.005f) {
+      duration = max_angular_distance / max_joint_velocity;
+    }
+    if (duration < duration_0) {
+      duration = duration_0;  // 取最大的时间
+    }
+    segment_durations.push_back(duration);
+    total_duration += duration;
+  }
+
+  if (total_duration < 1e-3) {
+    LOG_WARN("Total trajectory duration is near zero. No motion needed.");
+    return true;
+  }
+
+  // 边界条件
+  std::vector<std::vector<double>> positions(
+      num_joints, std::vector<double>(num_waypoints));
+  std::vector<std::vector<double>> velocities(
+      num_joints, std::vector<double>(num_waypoints, 0.0));
+  std::vector<std::vector<double>> accelerations(
+      num_joints, std::vector<double>(num_waypoints, 0.0));
+
+  for (size_t i = 0; i < num_waypoints; ++i) {
+    for (size_t j = 0; j < num_joints; ++j) {
+      positions[j][i] = sparse_joints[i](j);
+    }
+  }
+
+  for (size_t j = 0; j < num_joints; ++j) {
+    velocities[j][0] = 0.0;
+    accelerations[j][0] = 0.0;
+    velocities[j][num_waypoints - 1] = 0.0;
+    accelerations[j][num_waypoints - 1] = 0.0;
+
+    for (size_t i = 1; i < num_waypoints - 1; ++i) {
+      double h1 = segment_durations[i - 1];
+      double h2 = segment_durations[i];
+
+      if (h1 < 1e-6 || h2 < 1e-6) {
+        velocities[j][i] = 0.0;
+        accelerations[j][i] = 0.0;
+        continue;
+      }
+
+      double p_prev = positions[j][i - 1];
+      double p_curr = positions[j][i];
+      double p_next = positions[j][i + 1];
+
+      velocities[j][i] = (p_next - p_curr) / h2 * (h1 / (h1 + h2)) +
+                         (p_curr - p_prev) / h1 * (h2 / (h1 + h2));
+      accelerations[j][i] =
+          2.0 * ((p_next - p_curr) / h2 - (p_curr - p_prev) / h1) / (h1 + h2);
+    }
+  }
+
+  // 密集轨迹
+  const double dt = 1.0 / control_frequency;
+  double current_time_offset = 0.0;
+  const double start_time_sec = ros::Time::now().toSec();
+
+  std::vector<KDL::VelocityProfile_Spline> splines(num_joints);
+  trajectory.reserve(static_cast<size_t>(total_duration * control_frequency) *
+                         num_joints +
+                     num_joints);
+
+  for (size_t i = 0; i < num_waypoints - 1; ++i) {
+    const double seg_duration = segment_durations[i];
+    if (seg_duration < 1e-6) {
+      continue;
+    }
+
+    for (size_t j = 0; j < num_joints; ++j) {
+      splines[j].SetProfileDuration(positions[j][i], velocities[j][i],
+                                    accelerations[j][i], positions[j][i + 1],
+                                    velocities[j][i + 1],
+                                    accelerations[j][i + 1], seg_duration);
+    }
+
+    const int num_steps_in_segment =
+        static_cast<int>(std::round(seg_duration / dt));
+    for (int k = 0; k < num_steps_in_segment; ++k) {
+      const double t_local = k * dt;
+      for (size_t j = 0; j < num_joints; ++j) {
+        JointTrajectoryPoint point;
+        point.id = j;
+        point.timestamp = start_time_sec + current_time_offset + t_local;
+        point.position = splines[j].Pos(t_local);
+        point.velocity = splines[j].Vel(t_local);
+        point.acceleration = splines[j].Acc(t_local);
+        trajectory.push_back(point);
+      }
+    }
+    current_time_offset += seg_duration;
+  }
+
+  for (size_t j = 0; j < num_joints; ++j) {
+    JointTrajectoryPoint final_point;
+    final_point.id = j;
+    final_point.timestamp = start_time_sec + total_duration;
+    final_point.position = positions[j][num_waypoints - 1];
+    final_point.velocity = 0.0;
+    final_point.acceleration = 0.0;
+    trajectory.push_back(final_point);
+  }
+
+  LOG_INFO(
+      "Successfully interpolated trajectory with {} points over {:.2f} "
+      "seconds.",
+      trajectory.size() / num_joints, total_duration);
+
+  return true;
+}
+bool KinematicsSolver::InterpolateTrajectory(
     const std::vector<Eigen::VectorXf> &_trajectory_joints,
     JointTrajectory &trajectory, double duration, int num_steps) {
   if (_trajectory_joints.size() < 2) {

@@ -151,3 +151,9 @@ target_link_libraries(test_drag_controller
   hy_manipulation_controllers
   ${catkin_LIBRARIES}
 )
+
+add_executable(test_cartesian_pose src/test/test_cartesian_pose.cc)
+target_link_libraries(test_cartesian_pose
+  hy_manipulation_controllers
+  ${catkin_LIBRARIES}
+)
