@@ -18,9 +18,9 @@ int main(int argc, char** argv) {
   std::string source_dir = std::string(DK_SOURCE_DIR);
   std::string arm_param_folder = source_dir + "/params/";
 
-  hy_common::logger::Logger::GetInstance().Init(
-      hy_common::logger::LogLevel::INFO, hy_common::logger::LogLevel::INFO,
-      "controller_manager_node.log", 1 * 1024 * 1024, 10);
+  // hy_common::logger::Logger::GetInstance().Init(
+  //     hy_common::logger::LogLevel::INFO, hy_common::logger::LogLevel::INFO,
+  //     "controller_manager_node.log", 1 * 1024 * 1024, 10);
 
   LOG_INFO("--------------------------------");
   LOG_INFO("Test my scara controller started");

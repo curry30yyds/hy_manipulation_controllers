@@ -8,6 +8,7 @@
 #include <kdl/chainidsolver_recursive_newton_euler.hpp>
 #include <kdl/chainiksolverpos_nr_jl.hpp>
 #include <kdl/velocityprofile_spline.hpp>
+#include <kdl/velocityprofile_trap.hpp>
 #include <memory>
 #include <queue>
 #include <random>
@@ -45,12 +46,19 @@ class KinematicsSolver {
   //                            int num_steps);
   bool InterpolateTrajectory(
       const std::vector<Eigen::VectorXf> &_trajectory_joints,
-      JointTrajectory &trajectory, double duration, int num_steps);
+      JointTrajectory &trajectory, double duration,
+      int num_steps);  //原始的轨迹插值 手动设置段时间
 
-  bool InterpolateTrajectory(const std::vector<Eigen::VectorXf> &sparse_joints,
-                             JointTrajectory &trajectory,
-                             float max_joint_velocity, float acc_duration,
-                             float control_frequency);
+  bool InterpolateTrajectory(
+      const std::vector<Eigen::VectorXf> &sparse_joints,
+      JointTrajectory &trajectory, float max_joint_velocity, float acc_duration,
+      float control_frequency);  //新插值 设置关节最大运动速度 五次多项式
+
+  bool InterpolateTrajectory_pose(
+      const Eigen::VectorXf &current_joints,
+      const Eigen::VectorXf &_target_joint_positions,
+      JointTrajectory &trajectory, float max_joint_velocity, float acc_duration,
+      float control_frequency);  //新插值 梯形速度规划 只对单点pose插值
 
   bool SamplePose(Eigen::Matrix4f &_sampled_pose_out);
 
@@ -59,9 +67,6 @@ class KinematicsSolver {
   bool GetCameraExtrinsics(Eigen::Matrix4f &extrinsics_out) const;
 
   const KDL::Chain &GetChain() const { return chain_; }
-
-  bool SolveGravity(const Eigen::VectorXf &_joint_positions_in,
-                    Eigen::VectorXf &_gravity_torques_out);
 
  private:
   bool Initialize();

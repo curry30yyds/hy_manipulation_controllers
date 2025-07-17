@@ -234,44 +234,82 @@ bool KinematicsSolver::SolveIK(
   LOG_ERROR("IK solver failed to find solution.");
   return false;
 }
-bool KinematicsSolver::SolveGravity(const Eigen::VectorXf &_joint_positions_in,
-                                    Eigen::VectorXf &_gravity_torques_out) {
-  const size_t num_joints = chain_.getNrOfJoints();
-  if (_joint_positions_in.size() != num_joints) {
-    LOG_ERROR("SolveGravity Error: Expected {} joints, but got {}.", num_joints,
-              _joint_positions_in.size());
+
+bool KinematicsSolver::InterpolateTrajectory_pose(
+    const Eigen::VectorXf &current_joints,
+    const Eigen::VectorXf &_target_joint_positions, JointTrajectory &trajectory,
+    float max_joint_velocity, float _acc_duration, float control_frequency) {
+  std::vector<float> distances;
+  distances.resize(4);
+  float max_distance = -1.0;
+  int max_distance_joint = -1;
+  distances[0] = fabs(current_joints[0] - _target_joint_positions(0));
+  for (int i = 1; i < 4; i++) {
+    distances[i] = fabs(current_joints[i] - _target_joint_positions(i));
+    if (distances[i] > max_distance) {
+      max_distance = distances[i];
+      max_distance_joint = i;
+    }
+  }
+
+  if (max_distance_joint == -1) {
     return false;
   }
-
-  KDL::JntArray q(num_joints);  // 关节位置
-  for (size_t i = 0; i < num_joints; ++i) {
-    q(i) = _joint_positions_in(i);
+  float joint0_time_max = fabs(distances[0] / 0.08f);
+  float move_time = fabs(max_distance / max_joint_velocity);
+  if (max_distance < 0.02 || move_time < joint0_time_max) {
+    move_time = joint0_time_max;
+    if (move_time < 1e-3) {
+      return false;
+    }
+  }
+  LOG_INFO("Move time is [{}],Joint0 time is [{}]", move_time, joint0_time_max);
+  if (move_time < 2 * _acc_duration) {
+    // 确保总时间至少是两倍的加速时间
+    LOG_WARN(
+        "Move time is too short for the given acceleration. Adjusting "
+        "move_time.");
+    move_time = 2 * _acc_duration;
   }
 
-  // 在纯重力补偿计算中，关节速度和加速度均为0
-  KDL::JntArray qd(num_joints);
-  KDL::JntArray qdd(num_joints);
-  SetToZero(qd);
-  SetToZero(qdd);
+  // 为每个关节创建独立的速度曲线
+  std::vector<KDL::VelocityProfile_Trap> profiles;
+  for (int i = 0; i < current_joints.size(); ++i) {
+    double joint_travel_distance =
+        _target_joint_positions(i) - current_joints(i);
 
-  // 外部作用在末端的力，这里假设为0
-  std::vector<KDL::Wrench> f_ext(chain_.getNrOfSegments(), KDL::Wrench::Zero());
+    if (move_time <= _acc_duration) {
+      LOG_ERROR("move_time must be greater than _acc_duration.");
+      return false;
+    }
 
-  // 调用求解器
-  KDL::JntArray gravity_kdl(num_joints);
-  int status = id_solver_->CartToJnt(q, qd, qdd, f_ext, gravity_kdl);
+    double max_vel_joint = joint_travel_distance / (move_time - _acc_duration);
+    double max_acc_joint = max_vel_joint / _acc_duration;
 
-  if (status != 0) {
-    LOG_ERROR("ID solver failed with status code: {}", status);
-    return false;
+    KDL::VelocityProfile_Trap profile(fabs(max_vel_joint), fabs(max_acc_joint));
+    profile.SetProfile(0, joint_travel_distance);  // 设置起始位置和总位移
+    profiles.push_back(profile);
   }
 
-  //转换结果到 Eigen 向量
-  _gravity_torques_out.resize(num_joints);
-  for (size_t i = 0; i < num_joints; ++i) {
-    _gravity_torques_out(i) = gravity_kdl(i);
-  }
+  double time_step = 1.0 / control_frequency;
+  size_t num_steps = static_cast<size_t>(move_time / time_step) + 1;
+  trajectory.reserve(num_steps * current_joints.size());
 
+  double start_time_sec = ros::Time::now().toSec();  // 获取起始时间戳
+
+  for (double t = 0.0; t <= move_time; t += time_step) {
+    double timestamp = start_time_sec + t;
+    for (int j = 0; j < current_joints.size(); ++j) {
+      JointTrajectoryPoint point;
+      point.id = j;
+      point.timestamp = timestamp;
+      point.position = current_joints(j) + profiles[j].Pos(t);
+      point.velocity = profiles[j].Vel(t);
+      point.acceleration = profiles[j].Acc(t);
+
+      trajectory.push_back(point);
+    }
+  }
   return true;
 }
 bool KinematicsSolver::InterpolateTrajectory(
@@ -312,7 +350,7 @@ bool KinematicsSolver::InterpolateTrajectory(
       }
     }
     double duration_0 = std::abs(q_end(0) - q_start(0)) /
-                        5.0;  // 移动关节最大速度达到所需要时间
+                        0.06f;  // 移动关节最大速度达到所需要时间
     double duration = 0.0;
     if (max_angular_distance > 0.005f) {
       duration = max_angular_distance / max_joint_velocity;

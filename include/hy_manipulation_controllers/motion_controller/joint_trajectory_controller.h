@@ -27,6 +27,8 @@ class JointTrajectoryController : public MotionControllerBase {
   // void Stop(float _duration) const override;
   void Stop(float _duration) override;
 
+  JointTrajectory GetCurrentTrajectory() { return joint_trajectory_; }
+
  private:
   JointTrajectory joint_trajectory_;
 
@@ -34,8 +36,8 @@ class JointTrajectoryController : public MotionControllerBase {
 
   int num_joints_;
 
-  double Kp_ = 20.0;      // 示例比例增益
-  double Kd_ = 0.1;       // 示例微分增益
+  double Kp_ = 20.0;      // 比例增益
+  double Kd_ = 0.5;       // 微分增益
   double ff_gain_ = 1.0;  // 前馈增益
   double v_max = 3.0;     // 速度限幅
 };

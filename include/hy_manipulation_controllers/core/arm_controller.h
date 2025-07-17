@@ -87,8 +87,6 @@ class ArmController {
         return "UNKNOWN";
     }
   }
-  bool SaveTrajectoryToFile(const JointTrajectory &_trajectory,
-                            const std::string &_filename);
 
  public:
   /**
@@ -277,6 +275,14 @@ class ArmController {
   void JointStateCallback(
       const hy_hardware_interface::test_dm_4dof_state::ConstPtr &msg);
 
+  struct RecordedDataPoint {
+    double timestamp;
+    std::vector<JointState> measured_states;
+  };
+
+  void SaveLogToFileInternal(std::vector<RecordedDataPoint> measured_log,
+                             JointTrajectory planned_trajectory);
+
  private:
   std::unique_ptr<ros::NodeHandle> nh_;
   std::mutex joint_state_mutex_;
@@ -309,7 +315,7 @@ class ArmController {
     ros::Time timestamp;
     std::vector<JointState> joint_states;
   };
-  std::deque<JointStateHistoryEntry> joint_state_history_;
+  std::map<double, std::vector<JointState>> joint_state_history_;
 
   JointTrajectory current_trajectory_;
 
@@ -317,6 +323,12 @@ class ArmController {
 
   ros::Time last_state_timestamp_;
   std::vector<JointControlParams> joint_params_;
+
+  std::vector<RecordedDataPoint> trajectory_log_;
+
+  std::mutex trajectory_log_mutex_;
+  bool is_logging_ = false;
+  MotionControllerState previous_motion_state_ = MCS_STOPPED;
 };
 
 }  // namespace hy_manipulation_controllers

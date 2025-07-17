@@ -228,7 +228,43 @@ void ArmController::UpdateArmTf() {
 }
 
 void ArmController::UpdateMotionControllerState() {
-  //实现运动控制状态更新逻辑
+  if (is_logging_) {
+    std::lock_guard<std::mutex> lock(trajectory_log_mutex_);
+
+    trajectory_log_.push_back({ros::Time::now().toSec(), joint_states_});
+
+    // LOG_INFO("Joint 0 position:{}", joint_states_[0].position);
+  }
+
+  if (motion_controller_current_) {
+    MotionControllerState current_state =
+        motion_controller_current_->GetMotionControllerState();
+    // 前一个状态是运行 下一个是停止 说明结束
+    if (previous_motion_state_ == MCS_RUNNING && current_state == MCS_STOPPED) {
+      if (is_logging_) {
+        is_logging_ = false;
+        LOG_INFO("Save Finnished!");
+
+        auto traj_controller =
+            std::dynamic_pointer_cast<JointTrajectoryController>(
+                motion_controller_current_);
+        if (traj_controller) {
+          std::lock_guard<std::mutex> lock(trajectory_log_mutex_);
+          auto measured_data_snapshot = trajectory_log_;
+
+          auto planned_trajectory_snapshot =
+              traj_controller->GetCurrentTrajectory();
+          std::thread(&ArmController::SaveLogToFileInternal, this,
+                      std::move(measured_data_snapshot),
+                      std::move(planned_trajectory_snapshot))
+              .detach();
+
+          trajectory_log_.clear();
+        }
+      }
+    }
+    previous_motion_state_ = current_state;  // 更新状态，为下一次检测做准备
+  }
 }
 
 void ArmController::UpdateArmControllerState() {}
@@ -252,6 +288,10 @@ void ArmController::UpdateArmStateMsgs() {
   }
 
   joint_states_ = latest_joint_states_;
+
+  // 为了后续存数据
+  double timestamp = last_state_timestamp_.toSec();
+  joint_state_history_[timestamp] = latest_joint_states_;
 }
 
 void ArmController::JointStateCallback(
@@ -279,6 +319,7 @@ void ArmController::JointStateCallback(
   }
   joint_state_received_ = !latest_joint_states_.empty();
   last_state_timestamp_ = ros::Time::now();
+  // LOG_INFO("Joint 0 vel : [{}]", joint_states_[0].velocity);
   // LOG_INFO("Joint 0 position is {}", latest_joint_states_[0].position);
 }
 
@@ -330,84 +371,18 @@ void ArmController::DoJointPositionControl(
   for (size_t i = 0; i < joint_states_.size(); ++i) {
     current_joints(i) = joint_states_[i].position;
   }
-  std::vector<float> distances;
-  distances.resize(4);
-  float max_distance = -1.0;
-  int max_distance_joint = -1;
-  distances[0] = fabs(current_joints[0] - _target_joint_positions(0));
-  for (int i = 1; i < 4; i++) {
-    distances[i] = fabs(current_joints[i] - _target_joint_positions(i));
-    if (distances[i] > max_distance) {
-      max_distance = distances[i];
-      max_distance_joint = i;
-    }
+
+  JointTrajectory generated_trajectory;
+  kinematics_solver_->InterpolateTrajectory_pose(
+      current_joints, _target_joint_positions, generated_trajectory,
+      _vel_percentage, _acc_duration, 200);
+
+  {
+    std::lock_guard<std::mutex> lock(trajectory_log_mutex_);
+    trajectory_log_.clear();  // 清空旧日志
+    is_logging_ = true;       // 打开记录开关
   }
 
-  if (max_distance_joint == -1) {
-    return;
-  }
-
-  float move_time = fabs(max_distance / _vel_percentage);
-  if (max_distance < 0.02 || move_time < fabs(distances[0] / 5.0f)) {
-    move_time = fabs(distances[0] / 5.0f);
-    if (move_time < 1e-3) {
-      return;
-    }
-  }
-  if (move_time < 2 * _acc_duration) {
-    // 确保总时间至少是两倍的加速时间
-    LOG_WARN(
-        "Move time is too short for the given acceleration. Adjusting "
-        "move_time.");
-    move_time = 2 * _acc_duration;
-  }
-
-  // 为每个关节创建独立的速度曲线
-  std::vector<KDL::VelocityProfile_Trap> profiles;
-  for (int i = 0; i < current_joints.size(); ++i) {
-    double joint_travel_distance =
-        _target_joint_positions(i) - current_joints(i);
-
-    if (move_time <= _acc_duration) {
-      LOG_ERROR("move_time must be greater than _acc_duration.");
-      return;
-    }
-
-    double max_vel_joint = joint_travel_distance / (move_time - _acc_duration);
-    double max_acc_joint = max_vel_joint / _acc_duration;
-
-    KDL::VelocityProfile_Trap profile(fabs(max_vel_joint), fabs(max_acc_joint));
-    profile.SetProfile(0, joint_travel_distance);  // 设置起始位置和总位移
-    profiles.push_back(profile);
-  }
-
-  JointTrajectory generated_trajectory;  // 创建一个临时的轨迹容器
-  double control_frequency = 200.0;      // 控制器频率
-  double time_step = 1.0 / control_frequency;
-  size_t num_steps = static_cast<size_t>(move_time / time_step) + 1;
-  generated_trajectory.reserve(num_steps * current_joints.size());
-
-  double start_time_sec = ros::Time::now().toSec();  // 获取起始时间戳
-
-  for (double t = 0.0; t <= move_time; t += time_step) {
-    double timestamp = start_time_sec + t;
-    for (int j = 0; j < current_joints.size(); ++j) {
-      JointTrajectoryPoint point;
-      point.id = j;
-      point.timestamp = timestamp;
-      point.position = current_joints(j) + profiles[j].Pos(t);
-      point.velocity = profiles[j].Vel(t);
-      point.acceleration = profiles[j].Acc(t);
-
-      generated_trajectory.push_back(point);
-    }
-  }
-  auto now = std::chrono::system_clock::now();
-  auto in_time_t = std::chrono::system_clock::to_time_t(now);
-  std::stringstream ss;
-  ss << "trajectory_"
-     << std::put_time(std::localtime(&in_time_t), "%Y%m%d_%H%M%S") << ".csv";
-  SaveTrajectoryToFile(generated_trajectory, ss.str());
   {
     std::lock_guard<std::mutex> lock(motion_controller_mutex_);
 
@@ -416,6 +391,8 @@ void ArmController::DoJointPositionControl(
 
     motion_controller_current_->SetTrajectory(generated_trajectory);
     motion_controller_current_->Start();
+    previous_motion_state_ =
+        motion_controller_current_->GetMotionControllerState();
   }
 }
 void ArmController::DoCartesianTrajectoryControl(
@@ -462,13 +439,11 @@ void ArmController::DoJointTrajectoryControl(
   kinematics_solver_->InterpolateTrajectory(
       _target_trajectory_positions, current_trajectory_, _vel_percentage,
       _acc_duration, 200);
-  //保存轨迹
-  auto now = std::chrono::system_clock::now();
-  auto in_time_t = std::chrono::system_clock::to_time_t(now);
-  std::stringstream ss;
-  ss << "trajectory_"
-     << std::put_time(std::localtime(&in_time_t), "%Y%m%d_%H%M%S") << ".csv";
-  SaveTrajectoryToFile(current_trajectory_, ss.str());
+  {
+    std::lock_guard<std::mutex> lock(trajectory_log_mutex_);
+    trajectory_log_.clear();  // 清空旧日志
+    is_logging_ = true;       // 打开记录开关
+  }
 
   {
     std::lock_guard<std::mutex> lock(motion_controller_mutex_);
@@ -479,7 +454,10 @@ void ArmController::DoJointTrajectoryControl(
     motion_controller_current_->SetTrajectory(current_trajectory_);
 
     motion_controller_current_->Start();
+    previous_motion_state_ =
+        motion_controller_current_->GetMotionControllerState();
   }
+
   if (_block_flag) {
     LOG_INFO("Blocking until trajectory is complete...");
     ros::Rate poll_rate(100);
@@ -490,6 +468,7 @@ void ArmController::DoJointTrajectoryControl(
     }
     LOG_INFO("Trajectory finished, unblocking.");
   }
+
   // TEST 输出轨迹点
   // LOG_INFO("Total number of joint trajectories: {}",
   // sparse_joint_trajectory.size()); for (size_t i = 0; i <
@@ -503,43 +482,7 @@ void ArmController::DoJointTrajectoryControl(
   //   }
   // }
 }
-bool ArmController::SaveTrajectoryToFile(const JointTrajectory &_trajectory,
-                                         const std::string &_filename) {
-  if (_trajectory.empty()) {
-    LOG_WARN("Trajectory is empty, nothing to save.");
-    return false;
-  }
 
-  std::ofstream file_stream(_filename);
-  if (!file_stream.is_open()) {
-    LOG_ERROR("Failed to open file to save trajectory: {}", _filename);
-    return false;
-  }
-
-  file_stream << std::fixed << std::setprecision(6);
-
-  const int num_joints = kinematics_solver_->GetChain().getNrOfJoints();
-  file_stream << "timestamp";
-  for (int i = 0; i < num_joints; ++i) {
-    file_stream << ",j" << i << "_pos,j" << i << "_vel,j" << i << "_acc";
-  }
-  file_stream << "\n";
-
-  for (size_t i = 0; i < _trajectory.size(); i += num_joints) {
-    file_stream << _trajectory[i].timestamp;
-
-    for (int j = 0; j < num_joints; ++j) {
-      const auto &point = _trajectory[i + j];
-      file_stream << "," << point.position << "," << point.velocity << ","
-                  << point.acceleration;
-    }
-    file_stream << "\n";
-  }
-
-  file_stream.close();
-  LOG_INFO("Trajectory successfully saved to: {}", _filename);
-  return true;
-}
 void ArmController::StartStaticMode(const float &_stiffness) {
   LOG_INFO("Request to start Static Mode.");
 
@@ -576,22 +519,91 @@ void ArmController::StopDragMode() {
 
 // 点动模式 还没有实现
 void ArmController::StartJoggingMode(const float &_vel_percentage,
-                                     const float &_stiffness) {
-  LOG_WARN("Jogging mode is not fully implemented yet.");
-}
+                                     const float &_stiffness) {}
 
 void ArmController::SetJoggingJointTarget(
-    const Eigen::VectorXf &_joint_target) {
-  LOG_WARN("Jogging mode is not fully implemented yet.");
-}
+    const Eigen::VectorXf &_joint_target) {}
 
 void ArmController::SetJoggingPoseTarget(
-    const hy_common::geometry::Transform3D &_pose_target) {
-  LOG_WARN("Jogging mode is not fully implemented yet.");
+    const hy_common::geometry::Transform3D &_pose_target) {}
+
+void ArmController::StopJoggingMode() {}
+
+void ArmController::SaveLogToFileInternal(
+    std::vector<RecordedDataPoint> measured_log,
+    JointTrajectory planned_trajectory) {
+  if (planned_trajectory.empty() || measured_log.empty()) {
+    LOG_WARN(
+        "SaveLogToFileInternal: Received empty trajectory or log data. No file "
+        "will be saved.");
+    return;
+  }
+
+  auto now = std::chrono::system_clock::now();
+  auto in_time_t = std::chrono::system_clock::to_time_t(now);
+  std::stringstream ss;
+  ss << "trajectory_"
+     << std::put_time(std::localtime(&in_time_t), "%Y%m%d_%H%M%S") << ".csv";
+  std::string filename = ss.str();
+
+  std::ofstream file_stream(filename);
+  if (!file_stream.is_open()) {
+    LOG_ERROR("SaveLogToFileInternal: Failed to open file for writing: {}",
+              filename);
+    return;
+  }
+
+  file_stream << std::fixed << std::setprecision(6);
+  const size_t num_joints = measured_log.front().measured_states.size();
+
+  file_stream << "timestamp";
+  for (size_t i = 0; i < num_joints; ++i) {
+    file_stream << ",j" << i << "_pos_target"
+                << ",j" << i << "_vel_target"
+                << ",j" << i << "_acc_target"
+                << ",j" << i << "_pos_measured"
+                << ",j" << i << "_vel_measured";
+  }
+  file_stream << "\n";
+
+  size_t num_timesteps_planned = planned_trajectory.size() / num_joints;
+  size_t num_timesteps_measured = measured_log.size();
+  size_t num_timesteps_to_write =
+      std::min(num_timesteps_planned, num_timesteps_measured);
+
+  if (num_timesteps_planned != num_timesteps_measured) {
+    LOG_WARN(
+        "Planned trajectory has {} steps, but measured log has {} steps. "
+        "Writing the minimum of the two.",
+        num_timesteps_planned, num_timesteps_measured);
+  }
+
+  for (size_t i = 0; i < num_timesteps_to_write; ++i) {
+    // 使用规划轨迹的时间戳作为基准
+    file_stream << planned_trajectory[i * num_joints].timestamp;
+
+    const auto &measured_point = measured_log[i];
+
+    // 遍历每一个关节
+    for (size_t j = 0; j < num_joints; ++j) {
+      const auto &pt = planned_trajectory[i * num_joints + j];
+      const auto &measured = measured_point.measured_states[j];
+      if (j == 0) {
+        file_stream << "," << pt.position << "," << pt.velocity << ","
+                    << pt.acceleration << "," << measured.position << ","
+                    << measured.velocity;  //* 2 * M_PI / 0.072
+      } else {
+        file_stream << "," << pt.position << "," << pt.velocity << ","
+                    << pt.acceleration << "," << measured.position << ","
+                    << measured.velocity;
+      }
+    }
+    file_stream << "\n";
+  }
+
+  file_stream.close();
+  LOG_INFO("Background save task complete. Trajectory log saved to: {}",
+           filename);
 }
 
-void ArmController::StopJoggingMode() {
-  LOG_INFO("Request to stop Jogging Mode. Arm will hold its current position.");
-  StartStaticMode(1.0f);
-}
 }  // namespace hy_manipulation_controllers
