@@ -288,10 +288,6 @@ void ArmController::UpdateArmStateMsgs() {
   }
 
   joint_states_ = latest_joint_states_;
-
-  // 为了后续存数据
-  double timestamp = last_state_timestamp_.toSec();
-  joint_state_history_[timestamp] = latest_joint_states_;
 }
 
 void ArmController::JointStateCallback(
@@ -436,9 +432,14 @@ void ArmController::DoJointTrajectoryControl(
     const float &_stiffness, const bool &_block_flag) {
   // kinematics_solver_->InterpolateTrajectory(sparse_joint_trajectory,
   //                                           current_trajectory_, 8.0, 1600);
-  kinematics_solver_->InterpolateTrajectory(
+  //                                           原始固定时间插值
+  // kinematics_solver_->InterpolateTrajectory(
+  //     _target_trajectory_positions, current_trajectory_, _vel_percentage,
+  //     _acc_duration, 200);
+  // 差分近似
+  kinematics_solver_->InterpolateTrajectory_IPTP(
       _target_trajectory_positions, current_trajectory_, _vel_percentage,
-      _acc_duration, 200);
+      _acc_duration, 200);  //使用iptp算法插值
   {
     std::lock_guard<std::mutex> lock(trajectory_log_mutex_);
     trajectory_log_.clear();  // 清空旧日志
