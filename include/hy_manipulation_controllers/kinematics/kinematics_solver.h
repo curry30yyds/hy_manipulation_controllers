@@ -29,10 +29,16 @@ class KinematicsSolver {
   typedef std::shared_ptr<KinematicsSolver> Ptr;
 
  public:
-  KinematicsSolver(const KDL::Chain &_chain);
-  KinematicsSolver(const std::string &_urdf_path);
-  KinematicsSolver(const std::string &_urdf_path, const std::string &_base_link,
-                   const std::string &_tip_link);
+  /*
+ 四个构建函数介绍
+  */
+  KinematicsSolver();                          //内部构建chain
+  KinematicsSolver(const KDL::Chain &_chain);  //已有chain进行初始化
+  KinematicsSolver(
+      const std::string &_urdf_path);  //从urdf构建 并从urdf里面寻找
+  KinematicsSolver(
+      const std::string &_urdf_path, const std::string &_base_link,
+      const std::string &_tip_link);  //从urdf构建 并且能够自定义始末
   virtual ~KinematicsSolver() = default;
 
   bool SolveFK(const Eigen::VectorXf &_joint_positions_in,
@@ -95,9 +101,20 @@ class KinematicsSolver {
     Eigen::VectorXf acceleration;
   };
 
+  struct JointLinkInfo {
+    std::string joint_name;       // 关节名称
+    std::string child_link_name;  // 该段的子link名称
+    double max_vel;               // 最大关节速度
+    double joint_lower_limit;     // 关节下限
+    double joint_upper_limit;     // 关节上限
+    double link_length;           // 父link到子link的空间距离
+  };
+
   bool ComputeTimeOptimalProfiles(std::vector<SparseWaypoint> &sparse_waypoints,
                                   std::vector<double> &out_time_diff,
                                   float vel_percentage, float acc_duration);
+  bool ExtractLinkJointInfo(const std::string &_urdf_path,
+                            std::vector<JointLinkInfo> &infos);
 
  private:
   bool Initialize();
@@ -111,6 +128,7 @@ class KinematicsSolver {
   Eigen::Matrix4f camera_extrinsics_;
   std::unique_ptr<KDL::ChainIdSolver_RNE> id_solver_;
   std::vector<JointControlParams> joint_params_;
+  urdf::ModelInterfaceSharedPtr robot_model;
 };
 
 }  // namespace hy_manipulation_controllers

@@ -19,6 +19,7 @@
 #include "hy_manipulation_controllers/core/arm_controller_params.h"
 #include "hy_manipulation_controllers/kinematics/kinematics_solver.h"
 #include "hy_manipulation_controllers/motion_controller/drag_controller.h"
+#include "hy_manipulation_controllers/motion_controller/jogging_controller.h"
 #include "hy_manipulation_controllers/motion_controller/joint_trajectory_controller.h"
 #include "hy_manipulation_controllers/motion_controller/motion_controller_base.h"
 #include "hy_manipulation_controllers/motion_controller/static_controller.h"
@@ -87,6 +88,12 @@ class ArmController {
         return "UNKNOWN";
     }
   }
+
+  std::vector<JointState> get_latest_joint_states();
+
+  hy_common::geometry::Transform3D get_current_end_effector_pose();
+
+  bool GetLinkInfo(std::vector<KinematicsSolver::JointLinkInfo> &infos);
 
  public:
   /**

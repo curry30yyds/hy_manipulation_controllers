@@ -90,15 +90,15 @@ void JointTrajectoryController::Update(
   _joint_control_commands.resize(num_joints_);
 
   //单独位置控制
-  // for (int i = 0; i < num_joints_; ++i) {
-  //   const auto &target_point = joint_trajectory_[start_idx + i];
-  //   _joint_control_commands[i].id = target_point.id;
-  //   _joint_control_commands[i].target_position = target_point.position;
-  //   _joint_control_commands[i].target_velocity = 0.0f;
-  //   _joint_control_commands[i].mit_kp = 10.0f;
-  //   _joint_control_commands[i].mit_kd = 0.2f;
-  //   _joint_control_commands[i].mit_t_ff = 0.0f;
-  // }
+  for (int i = 0; i < num_joints_; ++i) {
+    const auto &target_point = joint_trajectory_[start_idx + i];
+    _joint_control_commands[i].id = target_point.id;
+    _joint_control_commands[i].target_position = target_point.position;
+    _joint_control_commands[i].target_velocity = 0.0f;
+    _joint_control_commands[i].mit_kp = 10.0f;
+    _joint_control_commands[i].mit_kd = 0.2f;
+    _joint_control_commands[i].mit_t_ff = 0.0f;
+  }
 
   //闭环速度控制
   // for (int i = 0; i < num_joints_; ++i) {
@@ -122,25 +122,26 @@ void JointTrajectoryController::Update(
   // }
 
   // old
-  for (int i = 0; i < num_joints_; ++i) {
-    const auto &target_point = joint_trajectory_[start_idx + i];
-    double err_pos = target_point.position - _joint_states[i].position;
-    double err_vel = target_point.velocity - _joint_states[i].velocity;
-    double t_ff = ff_gain_ * target_point.velocity;
-    double v_ctrl = t_ff + err_pos * joint_control_params_[i].Kp +
-                    err_vel * joint_control_params_[i].Kd;
-    if (std::isnan(v_ctrl)) {
-      LOG_ERROR("NaN control output detected for joint {}", i);
-      v_ctrl = 0.0;
-    }
-    // v_ctrl = std::max(-v_max, std::min(v_ctrl, v_max));
-    _joint_control_commands[i].id = target_point.id;
-    _joint_control_commands[i].target_position = target_point.position;
-    _joint_control_commands[i].target_velocity = v_ctrl;
-    _joint_control_commands[i].mit_kp = joint_control_params_[i].mit_kp;
-    _joint_control_commands[i].mit_kd = joint_control_params_[i].mit_kd;
-    _joint_control_commands[i].mit_t_ff = joint_control_params_[i].mit_t_ff;
-  }
+  //   for (int i = 0; i < num_joints_; ++i) {
+  //     const auto &target_point = joint_trajectory_[start_idx + i];
+  //     double err_pos = target_point.position - _joint_states[i].position;
+  //     double err_vel = target_point.velocity - _joint_states[i].velocity;
+  //     double t_ff = ff_gain_ * target_point.velocity;
+  //     double v_ctrl = t_ff + err_pos * joint_control_params_[i].Kp +
+  //                     err_vel * joint_control_params_[i].Kd;
+  //     if (std::isnan(v_ctrl)) {
+  //       LOG_ERROR("NaN control output detected for joint {}", i);
+  //       v_ctrl = 0.0;
+  //     }
+  //     // v_ctrl = std::max(-v_max, std::min(v_ctrl, v_max));
+  //     _joint_control_commands[i].id = target_point.id;
+  //     _joint_control_commands[i].target_position = target_point.position;
+  //     _joint_control_commands[i].target_velocity = v_ctrl;
+  //     _joint_control_commands[i].mit_kp = joint_control_params_[i].mit_kp;
+  //     _joint_control_commands[i].mit_kd = joint_control_params_[i].mit_kd;
+  //     _joint_control_commands[i].mit_t_ff =
+  //     joint_control_params_[i].mit_t_ff;
+  //   }
   trajectory_index_++;
 }
 

@@ -5,6 +5,62 @@
 
 namespace hy_manipulation_controllers {
 
+KinematicsSolver::KinematicsSolver() {
+  chain_.addSegment(
+      KDL::Segment(KDL::Joint(KDL::Joint::None),
+                   KDL::Frame::DH_Craig1989(0.0, 0.0, 0.008, 0.0)));
+
+  // 关节1 升降
+  chain_.addSegment(KDL::Segment(KDL::Joint(KDL::Joint::TransZ),
+                                 KDL::Frame::DH_Craig1989(0.0, 0.0, 0.0, 0.0)));
+
+  chain_.addSegment(
+      KDL::Segment(KDL::Joint(KDL::Joint::RotZ),
+                   KDL::Frame::DH_Craig1989(0.15, 0.0, 0.0, 0.0)));
+
+  chain_.addSegment(
+      KDL::Segment(KDL::Joint(KDL::Joint::RotZ),
+                   KDL::Frame::DH_Craig1989(0.15, 0.0, 0.0, 0.0)));
+
+  chain_.addSegment(
+      KDL::Segment(KDL::Joint(KDL::Joint::RotZ),
+                   KDL::Frame::DH_Craig1989(0.122, 0.0, 0.0, 0.0)));
+
+  chain_.addSegment(KDL::Segment(KDL::Joint(KDL::Joint::None),
+                                 KDL::Frame::DH_Craig1989(0.0, 0.0, 0.0, 0.0)));
+
+  joint_lower_limits_.resize(4);
+  joint_upper_limits_.resize(4);
+  joint_params_.resize(4);
+
+  joint_lower_limits_(0) = 0.0;
+  joint_lower_limits_(1) = -M_PI_2;
+  joint_lower_limits_(2) = -M_PI * 0.75;
+  joint_lower_limits_(3) = -M_PI * 0.75;
+
+  joint_upper_limits_(0) = 0.75;
+  joint_upper_limits_(1) = M_PI_2;
+  joint_upper_limits_(2) = M_PI * 0.75;
+  joint_upper_limits_(3) = M_PI * 0.75;
+
+  joint_params_[0].max_vel = 0.14;
+  joint_params_[1].max_vel = 8.0;
+  joint_params_[2].max_vel = 8.0;
+  joint_params_[3].max_vel = 8.0;
+
+  joint_params_[0].max_acc = 2.0 * joint_params_[0].max_vel;
+  joint_params_[1].max_acc = 2.0 * joint_params_[1].max_vel;
+  joint_params_[2].max_acc = 2.0 * joint_params_[2].max_vel;
+  joint_params_[3].max_acc = 2.0 * joint_params_[3].max_vel;
+
+  if (!Initialize()) {
+    throw std::runtime_error("Failed to initialize solvers");
+  }
+  LOG_INFO(
+      "[KinematicsSolver] Initialized successfully from existing chain with {} "
+      "joints.",
+      chain_.getNrOfJoints());
+}
 KinematicsSolver::KinematicsSolver(const KDL::Chain &_chain) : chain_(_chain) {
   if (!Initialize()) {
     throw std::runtime_error("Failed to initialize solvers");
@@ -16,7 +72,7 @@ KinematicsSolver::KinematicsSolver(const KDL::Chain &_chain) : chain_(_chain) {
 }
 
 KinematicsSolver::KinematicsSolver(const std::string &_urdf_path) {
-  urdf::ModelInterfaceSharedPtr robot_model = urdf::parseURDFFile(_urdf_path);
+  robot_model = urdf::parseURDFFile(_urdf_path);
   if (!robot_model) {
     throw std::runtime_error("Failed to parse URDF file: " + _urdf_path);
   }
@@ -104,7 +160,7 @@ KinematicsSolver::KinematicsSolver(const std::string &_urdf_path) {
 KinematicsSolver::KinematicsSolver(const std::string &_urdf_path,
                                    const std::string &_base_link,
                                    const std::string &_tip_link) {
-  urdf::ModelInterfaceSharedPtr robot_model = urdf::parseURDFFile(_urdf_path);
+  robot_model = urdf::parseURDFFile(_urdf_path);
   if (!robot_model) {
     throw std::runtime_error("Failed to parse URDF file: " + _urdf_path);
   }
@@ -190,7 +246,44 @@ bool KinematicsSolver::LoadCameraExtrinsics(
 
   return true;
 }
+bool KinematicsSolver::ExtractLinkJointInfo(const std::string &_urdf_path,
+                                            std::vector<JointLinkInfo> &infos) {
+  robot_model = urdf::parseURDFFile(_urdf_path);
+  infos.clear();
+  if (!robot_model) return false;
+  try {
+    for (const auto &segment : chain_.segments) {
+      const KDL::Joint &joint = segment.getJoint();
+      if (joint.getType() == KDL::Joint::None) continue;
+      JointLinkInfo info;
+      info.joint_name = joint.getName();
+      info.child_link_name = segment.getName();
+      urdf::JointConstSharedPtr urdf_joint =
+          robot_model->getJoint(info.joint_name);
+      if (!urdf_joint) continue;
 
+      if (urdf_joint->limits) {
+        info.max_vel = urdf_joint->limits->velocity;
+        info.joint_lower_limit = urdf_joint->limits->lower;
+        info.joint_upper_limit = urdf_joint->limits->upper;
+      } else {
+        info.max_vel = std::numeric_limits<double>::quiet_NaN();
+        info.joint_lower_limit = std::numeric_limits<double>::quiet_NaN();
+        info.joint_upper_limit = std::numeric_limits<double>::quiet_NaN();
+        LOG_ERROR("Can not get the limits from urdf!");
+      }
+      info.link_length = segment.getFrameToTip().p.Norm();
+      infos.push_back(info);
+    }
+    return true;
+  } catch (const std::exception &e) {
+    LOG_ERROR("ExtractKDLJointLinkInfo exception: {}", e.what());
+    return false;
+  } catch (...) {
+    LOG_ERROR("ExtractKDLJointLinkInfo: unknown exception!");
+    return false;
+  }
+}
 bool KinematicsSolver::GetCameraExtrinsics(
     Eigen::Matrix4f &_extrinsics_out) const {
   if (!has_camera_extrinsics_) {
@@ -467,8 +560,9 @@ bool KinematicsSolver::ComputeTimeOptimalProfiles(
 
   if (joint_params_.size() != num_joints) {
     LOG_ERROR(
-        "Stored joint parameters in KinematicsSolver do not match joint "
-        "count.");
+        "Stored joint parameters {} in KinematicsSolver do not match joint "
+        "count {}.",
+        joint_params_.size(), num_joints);
     return false;
   }
   for (auto &wp : sparse_waypoints) {
